@@ -125,6 +125,21 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                 ))
               )}
             </div>
+
+            <button 
+              className="btn-primary" 
+              onClick={() => window.location.reload()}
+              style={{ 
+                marginTop: '20px', 
+                background: 'rgba(239, 68, 68, 0.2)', 
+                borderColor: 'rgba(239, 68, 68, 0.4)', 
+                color: '#fca5a5', 
+                boxShadow: 'none', 
+                fontSize: '0.9rem' 
+              }}
+            >
+              Volver al Inicio
+            </button>
           </div>
         )}
 

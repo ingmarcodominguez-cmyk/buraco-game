@@ -629,8 +629,14 @@ io.on('connection', (socket) => {
     console.log(`Cliente desconectado: ${socket.id}`);
     const index = players.findIndex(p => p.socketId === socket.id);
     if (index !== -1) {
-      // Mantener al jugador en el lobby pero sin socketId activo (permitir reconexión)
-      players[index].socketId = null;
+      if (!gameState) {
+        // Si el juego no ha empezado, sacarlo del lobby por completo
+        players.splice(index, 1);
+        console.log(`Jugador removido del lobby por desconexión antes de iniciar.`);
+      } else {
+        // Mantener al jugador en el lobby pero sin socketId activo (permitir reconexión)
+        players[index].socketId = null;
+      }
       io.emit('lobby-update', players.map(p => p.name));
     }
 
