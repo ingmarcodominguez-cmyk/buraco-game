@@ -46,8 +46,12 @@ app.get('/debug-files', (req, res) => {
 if (fs.existsSync(distPath)) {
   console.log(`Servidor configurado para servir frontend desde: ${distPath}`);
   app.use(express.static(distPath));
-  app.get(/.*/, (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.includes('.')) {
+      res.sendFile(path.join(distPath, 'index.html'));
+    } else {
+      next();
+    }
   });
 } else {
   console.log('Advertencia: No se encontró la carpeta client/dist. El frontend no se servirá desde este puerto.');
