@@ -15,6 +15,34 @@ app.use(cors());
 
 // Servir archivos estáticos del cliente en producción si existen
 const distPath = path.join(__dirname, '../client/dist');
+
+app.get('/debug-files', (req, res) => {
+  try {
+    const cwd = process.cwd();
+    const serverDirname = __dirname;
+    const exists = fs.existsSync(distPath);
+    let files = [];
+    let assets = [];
+    if (exists) {
+      files = fs.readdirSync(distPath);
+      const assetsPath = path.join(distPath, 'assets');
+      if (fs.existsSync(assetsPath)) {
+        assets = fs.readdirSync(assetsPath);
+      }
+    }
+    res.json({
+      cwd,
+      serverDirname,
+      distPath,
+      exists,
+      files,
+      assets
+    });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 if (fs.existsSync(distPath)) {
   console.log(`Servidor configurado para servir frontend desde: ${distPath}`);
   app.use(express.static(distPath));
