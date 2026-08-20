@@ -52,6 +52,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   const [localHand, setLocalHand] = useState([]);
   const [logs, setLogs] = useState([]);
   const [startingAlert, setStartingAlert] = useState('');
+  const [draggedIndex, setDraggedIndex] = useState(null);
   const [scoreForm, setScoreForm] = useState({
     p0Mesa: 0, p0Limpias: 0, p0Sucias: 0, p0Mano: 0, p0Cierre: false, p0SinMuerto: false,
     p1Mesa: 0, p1Limpias: 0, p1Sucias: 0, p1Mano: 0, p1Cierre: false, p1SinMuerto: false
@@ -179,6 +180,32 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [logs]);
+
+  // Manejadores de arrastrar y soltar (Drag and Drop) para reordenar la mano
+  const handleDragStart = (e, index) => {
+    e.dataTransfer.setData('text/plain', index);
+    setDraggedIndex(index);
+  };
+
+  const handleDragOver = (e) => {
+    e.preventDefault();
+  };
+
+  const handleDrop = (e, targetIndex) => {
+    e.preventDefault();
+    if (draggedIndex === null || draggedIndex === targetIndex) return;
+
+    const newHand = [...localHand];
+    const [draggedCard] = newHand.splice(draggedIndex, 1);
+    newHand.splice(targetIndex, 0, draggedCard);
+    
+    setLocalHand(newHand);
+    setDraggedIndex(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggedIndex(null);
+  };
 
   if (!gameState) return null;
 
@@ -553,13 +580,20 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             return (
               <div 
                 key={card.id} 
+                draggable={true}
+                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragOver={handleDragOver}
+                onDrop={(e) => handleDrop(e, idx)}
+                onDragEnd={handleDragEnd}
                 style={{ 
                   position: 'relative',
+                  cursor: 'grab',
+                  opacity: draggedIndex === idx ? 0.3 : 1,
+                  transition: 'opacity 0.15s, transform 0.2s, box-shadow 0.2s',
                   ...(isFirstDrawn ? {
                     boxShadow: '0 0 15px #fbbf24',
                     borderRadius: '8px',
                     transform: 'translateY(-15px)',
-                    transition: 'transform 0.2s, box-shadow 0.2s',
                     zIndex: 10
                   } : {})
                 }}
