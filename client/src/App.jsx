@@ -4,7 +4,7 @@ import { io } from 'socket.io-client';
 import Lobby from './components/Lobby';
 import Board from './components/Board';
 import './App.css';
-import { AlertCircle, LogOut } from 'lucide-react';
+import { AlertCircle, LogOut, Maximize, Minimize } from 'lucide-react';
 
 // Conectar con Socket.io usando el proxy de Vite en desarrollo
 // O al origen actual en producción.
@@ -22,6 +22,25 @@ export default function App() {
   const [selectedTargetScore, setSelectedTargetScore] = useState(3000);
   const [joined, setJoined] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [isFullscreen, setIsFullscreen] = useState(false);
+
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    return () => document.removeEventListener('fullscreenchange', handleFullscreenChange);
+  }, []);
+
+  const toggleFullscreen = () => {
+    if (!document.fullscreenElement) {
+      document.documentElement.requestFullscreen().catch((err) => {
+        console.error(`Error attempting to enable fullscreen: ${err.message}`);
+      });
+    } else {
+      document.exitFullscreen();
+    }
+  };
 
   useEffect(() => {
     socket.on('connect', () => {
@@ -133,24 +152,35 @@ export default function App() {
         <h1 className="game-title">
           <span>🃏</span> BURACO MULTIJUGADOR
         </h1>
-        {joined && gameState && (
-          <div className="header-actions">
-            <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
-              Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
-            </span>
-            <button 
-              className="btn-header" 
-              onClick={() => {
-                if (window.confirm('¿Quieres salir de la partida actual?')) {
-                  window.location.reload();
-                }
-              }}
-              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-            >
-              <LogOut size={14} /> Salir
-            </button>
-          </div>
-        )}
+        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <button 
+            className="btn-header" 
+            onClick={toggleFullscreen}
+            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+          >
+            {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />} 
+            {isFullscreen ? 'Salir Completa' : 'Pantalla Completa'}
+          </button>
+          
+          {joined && gameState && (
+            <>
+              <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
+                Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
+              </span>
+              <button 
+                className="btn-header" 
+                onClick={() => {
+                  if (window.confirm('¿Quieres salir de la partida actual?')) {
+                    window.location.reload();
+                  }
+                }}
+                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+              >
+                <LogOut size={14} /> Salir
+              </button>
+            </>
+          )}
+        </div>
       </header>
 
       {/* Contenido principal: Lobby o Tablero */}

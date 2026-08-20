@@ -51,6 +51,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   const [selectedMeldIndex, setSelectedMeldIndex] = useState(null);
   const [localHand, setLocalHand] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [startingAlert, setStartingAlert] = useState('');
   const [scoreForm, setScoreForm] = useState({
     p0Mesa: 0, p0Limpias: 0, p0Sucias: 0, p0Mano: 0, p0Cierre: false, p0SinMuerto: false,
     p1Mesa: 0, p1Limpias: 0, p1Sucias: 0, p1Mano: 0, p1Cierre: false, p1SinMuerto: false
@@ -158,6 +159,20 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     }
   }, [gameState?.lastAction]);
 
+  // Alerta de inicio de ronda/juego (sorteo de mano)
+  useEffect(() => {
+    if (gameState?.lastAction) {
+      const action = gameState.lastAction;
+      if (action.includes('Sorteo:') || action.includes('Sorteo alternado:')) {
+        setStartingAlert(action);
+        const timer = setTimeout(() => {
+          setStartingAlert('');
+        }, 4000); // 4 segundos en pantalla
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [gameState?.lastAction]);
+
   // Auto-scroll del log de acciones
   useEffect(() => {
     logEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -253,6 +268,17 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
   return (
     <div className="board-container">
+      {startingAlert && (
+        <div className="starting-alert-overlay">
+          <div className="starting-alert-card glass-panel animate-scale-up">
+            <div className="alert-sparkle">🎉</div>
+            <h2 className="alert-title">Sorteo de Mano</h2>
+            <div className="alert-divider"></div>
+            <p className="alert-message">{startingAlert.replace('¡Comienza el juego! ', '').replace('Ronda ', 'Ronda').split('. ')[0]}</p>
+            <p className="alert-submessage">¡Que comience la partida!</p>
+          </div>
+        </div>
+      )}
       
       {/* AREA DE JUEGO PRINCIPAL */}
       <div className="main-playarea">
