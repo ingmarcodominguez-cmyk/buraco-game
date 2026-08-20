@@ -1047,19 +1047,29 @@ function runBotTurn(botIdx) {
         const botHasMorto = gameState.mortosTaken[botIdx];
         const deckCount = gameState.drawPile.length;
 
+        // Evaluar si el pozo de descarte es atractivo para desbloquearlo y poder levantarlo en los siguientes turnos.
+        const topDiscard = gameState.discardPile.length > 0 ? gameState.discardPile[gameState.discardPile.length - 1] : null;
+        const discardIsAttractive = topDiscard && (
+          gameState.discardPile.length >= 3 || 
+          topDiscard.rank === '2' || 
+          topDiscard.rank === 'Joker' ||
+          botHand.some(c => c.suit === topDiscard.suit)
+        );
+
         // Estrategia avanzada de Buraco: ocultar juegos en mano
         // La IA decide bajarse por primera vez si:
         // 1. El rival ya tiene el muerto (estamos en peligro de que cierre la partida).
         // 2. Quedan pocas cartas en el mazo de robo (menos de 10) para evitar quedarse con cartas negativas en la mano al fin de ronda.
-        const shouldMeldNow = opponentHasMorto || deckCount < 10;
+        // 3. El pozo de descarte es muy atractivo/pesado (queremos bajarnos de mano para poder levantarlo en los turnos siguientes).
+        const shouldMeldNow = opponentHasMorto || deckCount < 10 || discardIsAttractive;
 
-        // 3. O si bajando todas estas cartas, la IA se queda con 0 o 1 carta para tomar su propio muerto en este turno.
+        // 4. O si bajando todas estas cartas, la IA se queda con 0 o 1 carta para tomar su propio muerto en este turno.
         let totalCardsToMeld = 0;
         simMelds.forEach(m => totalCardsToMeld += m.length);
         const canTakeMortoThisTurn = !botHasMorto && (botHand.length - totalCardsToMeld <= 1);
 
         if (shouldMeldNow || canTakeMortoThisTurn) {
-          console.log(`IA decide bajarse por primera vez: opponentHasMorto=${opponentHasMorto}, canTakeMortoThisTurn=${canTakeMortoThisTurn}`);
+          console.log(`IA decide bajarse por primera vez: opponentHasMorto=${opponentHasMorto}, discardIsAttractive=${!!discardIsAttractive}, canTakeMortoThisTurn=${canTakeMortoThisTurn}`);
           simMelds.forEach(meld => {
             tryMeldBotRun(meld, botIdx, true); // Bypassear la validación de 30 puntos individuales
           });
