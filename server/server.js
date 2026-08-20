@@ -203,13 +203,19 @@ io.on('connection', (socket) => {
     if (players.length === 2 && players.every(p => p.socketId)) {
       if (!gameState) {
         gameState = initGame();
+        
+        // Sorteo inicial del jugador mano
+        const starter = Math.random() < 0.5 ? 0 : 1;
+        gameState.starterIndex = starter;
+        gameState.turn = starter;
+
         gameState.players[0].name = players[0] ? players[0].name : 'Jugador 1';
         gameState.players[1].name = players[1] ? players[1].name : 'Jugador 2';
         gameState.requiredCanastras = requiredCanastrasSetting;
         gameState.targetScore = targetScoreSetting;
         globalScores = [0, 0];
         gameState.scores = globalScores;
-        gameState.lastAction = `¡Comienza el juego! Turno de ${players[0] ? players[0].name : 'Jugador 1'}`;
+        gameState.lastAction = `¡Comienza el juego! Sorteo: sale de mano ${gameState.players[starter].name || 'Jugador'}.`;
       } else {
         // En caso de reconexión, sincronizar nombres
         gameState.players[0].name = players[0] ? players[0].name : (gameState.players[0].name || 'Jugador 1');
@@ -591,9 +597,12 @@ io.on('connection', (socket) => {
     isBotThinking = false; // Resetear IA
     const currentRequiredCanastras = gameState.requiredCanastras || 1;
     const currentTargetScore = gameState.targetScore || 3000;
+    const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
 
     // Inicializar nueva ronda
     const newGame = initGame();
+    newGame.starterIndex = previousStarter;
+    newGame.turn = previousStarter;
     newGame.players[0].name = players[0] ? players[0].name : (gameState ? gameState.players[0].name : 'Jugador 1');
     newGame.players[1].name = players[1] ? players[1].name : (gameState ? gameState.players[1].name : 'Jugador 2');
     newGame.requiredCanastras = currentRequiredCanastras;
@@ -601,7 +610,7 @@ io.on('connection', (socket) => {
     
     gameState = newGame;
     gameState.scores = globalScores;
-    gameState.lastAction = `Nueva ronda iniciada. Turno de ${players[gameState.turn] ? players[gameState.turn].name : gameState.players[gameState.turn].name}`;
+    gameState.lastAction = `Nueva ronda iniciada. Turno de ${gameState.players[previousStarter]?.name || 'Jugador'}`;
     
     sendStateToAll();
   });
@@ -615,12 +624,18 @@ io.on('connection', (socket) => {
     const oldGameState = gameState;
     
     gameState = initGame();
+    
+    // Sorteo inicial del jugador mano para la nueva partida
+    const starter = Math.random() < 0.5 ? 0 : 1;
+    gameState.starterIndex = starter;
+    gameState.turn = starter;
+
     gameState.players[0].name = players[0] ? players[0].name : (oldGameState ? oldGameState.players[0].name : 'Jugador 1');
     gameState.players[1].name = players[1] ? players[1].name : (oldGameState ? oldGameState.players[1].name : 'Jugador 2');
     gameState.requiredCanastras = currentRequiredCanastras;
     gameState.targetScore = currentTargetScore;
     gameState.scores = globalScores;
-    gameState.lastAction = `Partida reiniciada. Turno de ${players[gameState.turn] ? players[gameState.turn].name : gameState.players[gameState.turn].name}`;
+    gameState.lastAction = `Partida reiniciada. Sorteo: sale de mano ${gameState.players[starter].name || 'Jugador'}.`;
     sendStateToAll();
   });
 
@@ -688,14 +703,18 @@ io.on('connection', (socket) => {
     // Iniciar siguiente ronda inmediatamente
     const currentRequiredCanastras = gameState.requiredCanastras || 1;
     const currentHistory = [...gameState.roundHistory];
+    const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
+    const nextStarter = previousStarter === 0 ? 1 : 0;
 
     const newGame = initGame();
+    newGame.starterIndex = nextStarter;
+    newGame.turn = nextStarter;
     newGame.players[0].name = players[0] ? players[0].name : (gameState.players[0].name || 'Jugador 1');
     newGame.players[1].name = players[1] ? players[1].name : (gameState.players[1].name || 'Jugador 2');
     newGame.requiredCanastras = currentRequiredCanastras;
     newGame.roundHistory = currentHistory;
     newGame.scores = [...globalScores];
-    newGame.lastAction = `Ronda ${roundNum} registrada. ¡Comienza la ronda ${roundNum + 1}! Turno de ${newGame.players[newGame.turn]?.name || 'Jugador'}`;
+    newGame.lastAction = `Ronda ${roundNum} registrada. ¡Comienza la ronda ${roundNum + 1}! Sorteo alternado: sale de mano ${newGame.players[nextStarter]?.name || 'Jugador'}.`;
 
     gameState = newGame;
     isBotThinking = false; // Resetear IA
