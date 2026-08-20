@@ -169,6 +169,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           setStartingAlert('');
         }, 4000); // 4 segundos en pantalla
         return () => clearTimeout(timer);
+      } else {
+        setStartingAlert('');
       }
     }
   }, [gameState?.lastAction]);
