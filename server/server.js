@@ -1166,6 +1166,26 @@ function runBotTurn(botIdx) {
           score += (CARD_VALUES[card.rank] || 5);
         }
 
+        // Evitar descartar cartas que le sirvan al oponente en sus juegos bajados
+        const opponentIdx = botIdx === 0 ? 1 : 0;
+        const opponentPlayer = gameState.players[opponentIdx];
+        let servesOpponent = false;
+        
+        if (opponentPlayer && opponentPlayer.melds) {
+          for (const meld of opponentPlayer.melds) {
+            // Probar si la carta se puede acoplar a este juego del rival
+            const testMeld = [...meld, card];
+            if (validateMeld(testMeld).valid) {
+              servesOpponent = true;
+              break;
+            }
+          }
+        }
+        
+        if (servesOpponent) {
+          score += 300; // Gran penalización para evitar descartar cartas útiles para el rival
+        }
+
         if (score < minScore) {
           minScore = score;
           discardIdx = i;
