@@ -714,7 +714,7 @@ io.on('connection', (socket) => {
     newGame.requiredCanastras = currentRequiredCanastras;
     newGame.roundHistory = currentHistory;
     newGame.scores = [...globalScores];
-    newGame.lastAction = `Ronda ${roundNum} registrada. ¡Comienza la ronda ${roundNum + 1}! Sorteo alternado: sale de mano ${newGame.players[nextStarter]?.name || 'Jugador'}.`;
+    newGame.lastAction = `Ronda ${roundNum} registrada. ¡Comienza la ronda ${roundNum + 1}! Mano alternada: sale de mano ${newGame.players[nextStarter]?.name || 'Jugador'}.`;
 
     gameState = newGame;
     isBotThinking = false; // Resetear IA

@@ -160,11 +160,11 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     }
   }, [gameState?.lastAction]);
 
-  // Alerta de inicio de ronda/juego (sorteo de mano)
+  // Alerta de inicio de ronda/juego (sorteo/mano alternada)
   useEffect(() => {
     if (gameState?.lastAction) {
       const action = gameState.lastAction;
-      if (action.includes('Sorteo:') || action.includes('Sorteo alternado:')) {
+      if (action.includes('Sorteo:') || action.includes('Sorteo alternado:') || action.includes('Mano alternada:')) {
         setStartingAlert(action);
         const timer = setTimeout(() => {
           setStartingAlert('');
@@ -301,9 +301,17 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         <div className="starting-alert-overlay">
           <div className="starting-alert-card glass-panel animate-scale-up">
             <div className="alert-sparkle">🎉</div>
-            <h2 className="alert-title">Sorteo de Mano</h2>
+            <h2 className="alert-title">
+              {startingAlert.includes('Mano alternada:') || startingAlert.includes('Sorteo alternado:') 
+                ? 'Mano Alternada' 
+                : 'Sorteo de Mano'}
+            </h2>
             <div className="alert-divider"></div>
-            <p className="alert-message">{startingAlert.replace('¡Comienza el juego! ', '').replace('Ronda ', 'Ronda').split('. ')[0]}</p>
+            <p className="alert-message">
+              {startingAlert.includes('¡Comienza la ronda') 
+                ? (startingAlert.split('. ')[1] || startingAlert) 
+                : startingAlert.replace('¡Comienza el juego! ', '').split('. ')[0]}
+            </p>
             <p className="alert-submessage">¡Que comience la partida!</p>
           </div>
         </div>
