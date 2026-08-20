@@ -1040,11 +1040,32 @@ function runBotTurn(botIdx) {
         });
       });
 
-      // Si el total combinado es >= 30, bajarlos todos
+      // Si el total combinado es >= 30, aplicar Heurística Estratégica para la primera bajada
       if (totalSum >= 30) {
-        simMelds.forEach(meld => {
-          tryMeldBotRun(meld, botIdx, true); // Bypassear la validación individual
-        });
+        const opponentIdx = botIdx === 0 ? 1 : 0;
+        const opponentHasMorto = gameState.mortosTaken[opponentIdx];
+        const botHasMorto = gameState.mortosTaken[botIdx];
+        const deckCount = gameState.drawPile.length;
+
+        // Estrategia avanzada de Buraco: ocultar juegos en mano
+        // La IA decide bajarse por primera vez si:
+        // 1. El rival ya tiene el muerto (estamos en peligro de que cierre la partida).
+        // 2. Quedan pocas cartas en el mazo de robo (menos de 10) para evitar quedarse con cartas negativas en la mano al fin de ronda.
+        const shouldMeldNow = opponentHasMorto || deckCount < 10;
+
+        // 3. O si bajando todas estas cartas, la IA se queda con 0 o 1 carta para tomar su propio muerto en este turno.
+        let totalCardsToMeld = 0;
+        simMelds.forEach(m => totalCardsToMeld += m.length);
+        const canTakeMortoThisTurn = !botHasMorto && (botHand.length - totalCardsToMeld <= 1);
+
+        if (shouldMeldNow || canTakeMortoThisTurn) {
+          console.log(`IA decide bajarse por primera vez: opponentHasMorto=${opponentHasMorto}, canTakeMortoThisTurn=${canTakeMortoThisTurn}`);
+          simMelds.forEach(meld => {
+            tryMeldBotRun(meld, botIdx, true); // Bypassear la validación de 30 puntos individuales
+          });
+        } else {
+          console.log(`IA retiene sus juegos en la mano estratégicamente: totalSum=${totalSum}, cartas a bajar=${totalCardsToMeld}`);
+        }
       }
     } else {
       // Si ya bajamos juego antes, bajar cualquier secuencia o tercio válido inmediatamente
