@@ -564,27 +564,27 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
       {/* ACCIONES DEL JUGADOR (ABAJO A LA DERECHA, AL LADO DE LA MANO) */}
       <div className="player-actions-container">
-        {/* Turno e Info Muerto (Muy compactos) */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
-          <span className={`badge-info ${isMyTurn ? 'active-turn-badge' : ''}`} style={{ fontSize: '0.65rem', padding: '3px 6px', fontWeight: 'bold', borderRadius: '4px', flexGrow: 1, textAlign: 'center', whiteSpace: 'nowrap' }}>
+        {/* Turno e Info Muerto (Botones y texto más legibles) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px', marginBottom: '4px' }}>
+          <span className={`badge-info ${isMyTurn ? 'active-turn-badge' : ''}`} style={{ fontSize: '0.75rem', padding: '4px 8px', fontWeight: 'bold', borderRadius: '4px', flexGrow: 1, textAlign: 'center', whiteSpace: 'nowrap' }}>
             {isMyTurn ? (needToDraw ? '🚨 ROBAR' : '👉 JUGAR') : '⏳ RIVAL'}
           </span>
-          <span style={{ fontSize: '0.65rem', color: myPlayer?.hasTakenMorto ? '#10b981' : '#fbbf24', fontWeight: 600, padding: '3px 6px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+          <span style={{ fontSize: '0.75rem', color: myPlayer?.hasTakenMorto ? '#10b981' : '#fbbf24', fontWeight: 600, padding: '4px 8px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', whiteSpace: 'nowrap' }}>
             {myPlayer?.hasTakenMorto ? 'Con Muerto' : 'Sin Muerto'}
           </span>
         </div>
 
-        {/* Botones de acción */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        {/* Botones de acción (Más legibles y grandes) */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
           {/* Fase de Robo */}
           {isMyTurn && needToDraw && (
-            <div style={{ display: 'flex', gap: '4px' }}>
+            <div style={{ display: 'flex', gap: '5px' }}>
               <button 
                 className="btn-action btn-blue" 
                 onClick={handleDrawCard}
-                style={{ flex: 1, fontSize: '0.75rem', padding: '4px 6px', height: '28px', justifyContent: 'center' }}
+                style={{ flex: 1, fontSize: '0.88rem', padding: '6px 10px', height: '35px', justifyContent: 'center' }}
               >
-                <ArrowDown size={12} style={{ marginRight: '4px' }} /> Mazo
+                <ArrowDown size={14} style={{ marginRight: '4px' }} /> Mazo
               </button>
               <button 
                 className="btn-action btn-blue" 
@@ -592,57 +592,57 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 disabled={myPlayer?.melds.length === 0}
                 style={{ 
                   flex: 1, 
-                  fontSize: '0.75rem', 
-                  padding: '4px 6px', 
-                  height: '28px', 
+                  fontSize: '0.88rem', 
+                  padding: '6px 10px', 
+                  height: '35px', 
                   justifyContent: 'center',
                   opacity: myPlayer?.melds.length === 0 ? 0.5 : 1
                 }}
                 title={myPlayer?.melds.length === 0 ? "Bájate primero" : `Robar pozo (${gameState.discardPile.length})`}
               >
-                <ArrowDown size={12} style={{ marginRight: '4px' }} /> Pozo ({gameState.discardPile.length})
+                <ArrowDown size={14} style={{ marginRight: '4px' }} /> Pozo ({gameState.discardPile.length})
               </button>
             </div>
           )}
 
           {/* Fase de Juego */}
           {canPlay && (
-            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+            <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
               <button 
                 className="btn-action btn-green" 
                 onClick={handleMeldSequence}
                 disabled={selectedCardIds.length < 3}
-                style={{ flex: '1 1 48%', fontSize: '0.7rem', padding: '4px 4px', height: '26px', justifyContent: 'center' }}
+                style={{ flex: '1 1 47%', fontSize: '0.82rem', padding: '6px 6px', height: '32px', justifyContent: 'center' }}
               >
-                <PlusCircle size={12} style={{ marginRight: '2px' }} /> Bajar
+                <PlusCircle size={14} style={{ marginRight: '3px' }} /> Bajar
               </button>
               <button 
                 className="btn-action btn-green" 
                 onClick={handleAppendToMeld}
                 disabled={selectedMeldIndex === null || selectedCardIds.length === 0}
-                style={{ flex: '1 1 48%', fontSize: '0.7rem', padding: '4px 4px', height: '26px', justifyContent: 'center' }}
+                style={{ flex: '1 1 47%', fontSize: '0.82rem', padding: '6px 6px', height: '32px', justifyContent: 'center' }}
               >
-                <FolderPlus size={12} style={{ marginRight: '2px' }} /> Acoplar ({selectedCardIds.length})
+                <FolderPlus size={14} style={{ marginRight: '3px' }} /> Acoplar ({selectedCardIds.length})
               </button>
               <button 
                 className="btn-action btn-red" 
                 onClick={handleDiscard}
                 disabled={selectedCardIds.length !== 1}
-                style={{ flex: '1 1 98%', fontSize: '0.7rem', padding: '4px 4px', height: '26px', justifyContent: 'center' }}
+                style={{ flex: '1 1 98%', fontSize: '0.82rem', padding: '6px 6px', height: '32px', justifyContent: 'center' }}
               >
-                <ArrowUp size={12} style={{ marginRight: '4px' }} /> Descartar
+                <ArrowUp size={14} style={{ marginRight: '4px' }} /> Descartar
               </button>
             </div>
           )}
 
-          {/* Botón de Ordenar (Siempre visible, ultra compacto) */}
+          {/* Botón de Ordenar */}
           <button 
             className="btn-action btn-gray" 
             onClick={handleSortHand}
             disabled={localHand.length === 0}
-            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 6px', height: '26px', justifyContent: 'center' }}
+            style={{ width: '100%', fontSize: '0.82rem', padding: '5px 8px', height: '30px', justifyContent: 'center' }}
           >
-            <SortAsc size={12} style={{ marginRight: '4px' }} /> Ordenar Mano
+            <SortAsc size={14} style={{ marginRight: '4px' }} /> Ordenar Mano
           </button>
         </div>
       </div>
@@ -676,23 +676,23 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         {gameState.roundHistory && gameState.roundHistory.length > 0 && (
           <div className="sidebar-section" style={{ borderTop: '1px solid var(--glass-border)' }}>
             <h2 className="sidebar-title" style={{ color: '#34d399', marginBottom: '8px' }}>Planilla de Rondas</h2>
-            <div style={{ maxHeight: '140px', overflowY: 'auto', fontSize: '0.8rem' }}>
+            <div style={{ maxHeight: '120px', overflowY: 'auto', fontSize: '0.72rem' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                 <thead>
                   <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
-                    <th style={{ padding: '4px' }}>Ronda</th>
-                    <th style={{ padding: '4px' }}>{gameState.players?.[0]?.name || 'J1'}</th>
-                    <th style={{ padding: '4px' }}>{gameState.players?.[1]?.name || 'J2'}</th>
+                    <th style={{ padding: '3px 4px' }}>Ronda</th>
+                    <th style={{ padding: '3px 4px' }}>{gameState.players?.[0]?.name || 'J1'}</th>
+                    <th style={{ padding: '3px 4px' }}>{gameState.players?.[1]?.name || 'J2'}</th>
                   </tr>
                 </thead>
                 <tbody>
                   {gameState.roundHistory && gameState.roundHistory.map((rh, idx) => (
                     <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                      <td style={{ padding: '4px', fontWeight: 'bold' }}>R{rh.round}</td>
-                      <td style={{ padding: '4px', color: (rh.totals?.[0] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
+                      <td style={{ padding: '3px 4px', fontWeight: 'bold' }}>R{rh.round}</td>
+                      <td style={{ padding: '3px 4px', color: (rh.totals?.[0] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
                         {(rh.totals?.[0] || 0) >= 0 ? `+${rh.totals?.[0] || 0}` : rh.totals?.[0] || 0}
                       </td>
-                      <td style={{ padding: '4px', color: (rh.totals?.[1] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
+                      <td style={{ padding: '3px 4px', color: (rh.totals?.[1] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
                         {(rh.totals?.[1] || 0) >= 0 ? `+${rh.totals?.[1] || 0}` : rh.totals?.[1] || 0}
                       </td>
                     </tr>

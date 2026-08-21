@@ -649,17 +649,17 @@ body {
 
 /* Sidebar Sections */
 .sidebar-section {
-  padding: 16px;
+  padding: 10px 12px;
   border-bottom: 1px solid var(--glass-border);
 }
 
 .sidebar-title {
-  font-size: 0.9rem;
+  font-size: 0.82rem;
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   color: #94a3b8;
-  margin-bottom: 12px;
+  margin-bottom: 6px;
 }
 
 /* Game Status Log */
@@ -686,11 +686,11 @@ body {
 .score-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 0.9rem;
+  font-size: 0.78rem;
 }
 
 .score-table th, .score-table td {
-  padding: 6px 8px;
+  padding: 4px 6px;
   text-align: left;
 }
 
