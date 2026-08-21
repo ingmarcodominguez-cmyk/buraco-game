@@ -87,6 +87,7 @@ let gameState = null; // Estado actual de la partida de Buraco
 let globalScores = [0, 0]; // Puntajes globales acumulados
 let requiredCanastrasSetting = 1; // Canastras configuradas desde el lobby (1 o 2)
 let targetScoreSetting = 3000; // Puntos para ganar la partida (modificable desde el lobby)
+let cleanupTimeout = null; // Temporizador para limpieza diferida tras desconexión
 
 // Envía el estado de juego sanitizado a cada jugador para evitar trampas
 function sendStateToAll() {
@@ -152,6 +153,13 @@ io.on('connection', (socket) => {
 
   // Unirse al lobby y configurar partida
   socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore }) => {
+    // Si hay una limpieza programada en curso, cancelarla ya que el jugador regresó
+    if (cleanupTimeout) {
+      console.log(`Jugador regresó (${name}). Cancelando limpieza diferida del juego.`);
+      clearTimeout(cleanupTimeout);
+      cleanupTimeout = null;
+    }
+
     if (requiredCanastras) {
       requiredCanastrasSetting = requiredCanastras === 2 ? 2 : 1;
     }
@@ -160,15 +168,23 @@ io.on('connection', (socket) => {
     }
 
     if (isAgainstBot) {
-      // Forzar lobby contra la PC, limpiando cualquier residuo
-      players = [
-        { socketId: socket.id, name },
-        { socketId: 'bot-socket', name: 'Computadora (IA)', isBot: true }
-      ];
-      gameState = null; // Forzar reinicio del juego
-      globalScores = [0, 0];
-      isBotThinking = false;
-      console.log(`Partida contra la PC iniciada para ${name}`);
+      // Verificar si hay una reconexión de juego contra PC activa
+      const isReconnecting = gameState && players[0] && players[0].name === name && players[1] && players[1].isBot;
+
+      if (isReconnecting) {
+        players[0].socketId = socket.id;
+        console.log(`Jugador se reconectó a su partida contra la PC: ${name}`);
+      } else {
+        // Forzar lobby contra la PC, limpiando cualquier residuo
+        players = [
+          { socketId: socket.id, name },
+          { socketId: 'bot-socket', name: 'Computadora (IA)', isBot: true }
+        ];
+        gameState = null; // Forzar reinicio del juego
+        globalScores = [0, 0];
+        isBotThinking = false;
+        console.log(`Partida contra la PC iniciada para ${name}`);
+      }
     } else {
       // Si ya existe este socket en el lobby, actualizar nombre
       const existingIndex = players.findIndex(p => p.socketId === socket.id);
@@ -655,14 +671,23 @@ io.on('connection', (socket) => {
       io.emit('lobby-update', players.map(p => p.name));
     }
 
-    // Si no quedan jugadores humanos conectados, limpiar la partida por completo
-    const activeHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket');
+    // Si no quedan jugadores humanos conectados, programar limpieza diferida (gracia de 60s en caso de F5 o reconexión)
+    const activeHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot);
     if (activeHumans.length === 0) {
-      console.log('Lobby vacío de humanos. Limpiando estado de Buraco.');
-      players = [];
-      gameState = null;
-      globalScores = [0, 0];
-      isBotThinking = false;
+      console.log('Lobby vacío de humanos. Programando limpieza diferida en 60 segundos.');
+      if (cleanupTimeout) clearTimeout(cleanupTimeout);
+      cleanupTimeout = setTimeout(() => {
+        // Volver a verificar si sigue vacío antes de borrar
+        const stillNoHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot).length === 0;
+        if (stillNoHumans) {
+          console.log('Expiró el tiempo de espera (60s). Limpiando estado de Buraco.');
+          players = [];
+          gameState = null;
+          globalScores = [0, 0];
+          isBotThinking = false;
+        }
+        cleanupTimeout = null;
+      }, 60000); // 60 segundos de gracia
     }
   });
 
