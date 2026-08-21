@@ -558,24 +558,49 @@ body {
 .hand-scroll-area {
   display: flex;
   overflow-x: auto;
-  padding: 10px 5px;
-  min-height: 125px;
-  gap: 4px; /* Default cards can overlap or space out */
+  padding: 6px 5px;
+  min-height: 105px;
+  gap: 4px;
 }
 
 /* Selectable card style in hand */
 .hand-scroll-area .playing-card {
+  width: 58px;
+  height: 85px;
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.2s;
+  padding: 4px;
+}
+
+.hand-scroll-area .playing-card .card-top-left {
+  font-size: 0.85rem;
+}
+
+.hand-scroll-area .playing-card .card-top-left span:first-child {
+  font-size: 0.95rem;
+}
+
+.hand-scroll-area .playing-card .card-suit-big {
+  font-size: 1.3rem;
+  margin-top: -6px;
+}
+
+.hand-scroll-area .playing-card .card-value-display {
+  font-size: 0.6rem;
+}
+
+.hand-scroll-area .playing-card .card-wildcard-badge {
+  font-size: 0.45rem !important;
+  padding: 0px 2px !important;
 }
 
 .hand-scroll-area .playing-card:hover {
-  transform: translateY(-20px);
+  transform: translateY(-12px);
   z-index: 10;
 }
 
 .hand-scroll-area .playing-card.selected {
-  transform: translateY(-28px);
+  transform: translateY(-20px);
   border: 2px solid #3b82f6;
   box-shadow: 0 0 12px rgba(59, 130, 246, 0.8);
   z-index: 10;
