@@ -423,18 +423,22 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 }}
                 title={myPlayer?.melds.length === 0 ? "No puedes robar del pozo hasta haber bajado al menos un juego" : ""}
               >
-                {(animatingDiscard ? gameState.discardPile.slice(0, -1) : gameState.discardPile).map((card, idx) => (
-                  <div 
-                    key={card.id || idx}
-                    style={{
-                      marginRight: '6px',
-                      boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
-                      pointerEvents: 'none'
-                    }}
-                  >
-                    <Card card={card} isHidden={false} />
-                  </div>
-                ))}
+                {(() => {
+                  const list = animatingDiscard ? gameState.discardPile.slice(0, -1) : gameState.discardPile;
+                  return list.map((card, idx) => (
+                    <div 
+                      key={card.id || idx}
+                      style={{
+                        marginRight: idx === list.length - 1 ? '0px' : '-46px',
+                        boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
+                        pointerEvents: 'none',
+                        zIndex: idx
+                      }}
+                    >
+                      <Card card={card} isHidden={false} />
+                    </div>
+                  ));
+                })()}
               </div>
             ) : (
               <div 

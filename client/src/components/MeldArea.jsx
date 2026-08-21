@@ -3,8 +3,10 @@ import React from 'react';
 import Card from './Card';
 
 export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOpponent }) {
+  const isCompact = melds.length >= 3;
+
   return (
-    <div className="melds-container">
+    <div className={`melds-container ${isCompact ? 'compact' : ''}`}>
       {melds.length === 0 ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%', color: '#64748b', fontSize: '0.85rem', fontStyle: 'italic' }}>
           Ningún juego bajado aún

@@ -394,10 +394,11 @@ body {
 /* Center Table Area (Piles) */
 .table-center {
   display: flex;
-  justify-content: center;
+  justify-content: flex-start;
   align-items: center;
-  gap: 32px;
+  gap: 24px;
   margin: 8px 0;
+  padding-left: 16px;
 }
 
 .deck-pile, .discard-pile-container {
@@ -927,4 +928,47 @@ body {
   50% {
     transform: scale(1.15);
   }
+}
+
+/* Compact Meld Sizing */
+.melds-container.compact {
+  --card-width: 48px;
+  --card-height: 70px;
+  --card-overlap: -18px;
+  gap: 8px; /* Menor espacio entre filas */
+  padding: 4px;
+}
+
+.melds-container.compact .meld-row {
+  padding: 4px;
+  border-radius: 6px;
+}
+
+.melds-container.compact .canastra-badge {
+  font-size: 0.6rem;
+  top: -6px;
+  padding: 0.5px 4px;
+}
+
+.melds-container.compact .card-value-display {
+  font-size: 0.55rem;
+  padding: 0px 2px;
+}
+
+.melds-container.compact .card-top-left {
+  font-size: 0.75rem;
+  padding: 2px;
+}
+
+.melds-container.compact .card-top-left span:first-child {
+  font-size: 0.85rem;
+}
+
+.melds-container.compact .card-suit-big {
+  font-size: 1.1rem;
+}
+
+.melds-container.compact .card-wildcard-badge {
+  font-size: 0.45rem !important;
+  padding: 0px 2px !important;
 }
