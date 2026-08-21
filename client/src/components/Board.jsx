@@ -562,6 +562,91 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         </div>
       </div>
 
+      {/* ACCIONES DEL JUGADOR (ABAJO A LA DERECHA, AL LADO DE LA MANO) */}
+      <div className="player-actions-container">
+        {/* Turno e Info Muerto (Muy compactos) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px', marginBottom: '2px' }}>
+          <span className={`badge-info ${isMyTurn ? 'active-turn-badge' : ''}`} style={{ fontSize: '0.65rem', padding: '3px 6px', fontWeight: 'bold', borderRadius: '4px', flexGrow: 1, textAlign: 'center', whiteSpace: 'nowrap' }}>
+            {isMyTurn ? (needToDraw ? '🚨 ROBAR' : '👉 JUGAR') : '⏳ RIVAL'}
+          </span>
+          <span style={{ fontSize: '0.65rem', color: myPlayer?.hasTakenMorto ? '#10b981' : '#fbbf24', fontWeight: 600, padding: '3px 6px', background: 'rgba(0,0,0,0.2)', borderRadius: '4px', whiteSpace: 'nowrap' }}>
+            {myPlayer?.hasTakenMorto ? 'Con Muerto' : 'Sin Muerto'}
+          </span>
+        </div>
+
+        {/* Botones de acción */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+          {/* Fase de Robo */}
+          {isMyTurn && needToDraw && (
+            <div style={{ display: 'flex', gap: '4px' }}>
+              <button 
+                className="btn-action btn-blue" 
+                onClick={handleDrawCard}
+                style={{ flex: 1, fontSize: '0.75rem', padding: '4px 6px', height: '28px', justifyContent: 'center' }}
+              >
+                <ArrowDown size={12} style={{ marginRight: '4px' }} /> Mazo
+              </button>
+              <button 
+                className="btn-action btn-blue" 
+                onClick={handleDrawDiscard}
+                disabled={myPlayer?.melds.length === 0}
+                style={{ 
+                  flex: 1, 
+                  fontSize: '0.75rem', 
+                  padding: '4px 6px', 
+                  height: '28px', 
+                  justifyContent: 'center',
+                  opacity: myPlayer?.melds.length === 0 ? 0.5 : 1
+                }}
+                title={myPlayer?.melds.length === 0 ? "Bájate primero" : `Robar pozo (${gameState.discardPile.length})`}
+              >
+                <ArrowDown size={12} style={{ marginRight: '4px' }} /> Pozo ({gameState.discardPile.length})
+              </button>
+            </div>
+          )}
+
+          {/* Fase de Juego */}
+          {canPlay && (
+            <div style={{ display: 'flex', gap: '4px', flexWrap: 'wrap' }}>
+              <button 
+                className="btn-action btn-green" 
+                onClick={handleMeldSequence}
+                disabled={selectedCardIds.length < 3}
+                style={{ flex: '1 1 48%', fontSize: '0.7rem', padding: '4px 4px', height: '26px', justifyContent: 'center' }}
+              >
+                <PlusCircle size={12} style={{ marginRight: '2px' }} /> Bajar
+              </button>
+              <button 
+                className="btn-action btn-green" 
+                onClick={handleAppendToMeld}
+                disabled={selectedMeldIndex === null || selectedCardIds.length === 0}
+                style={{ flex: '1 1 48%', fontSize: '0.7rem', padding: '4px 4px', height: '26px', justifyContent: 'center' }}
+              >
+                <FolderPlus size={12} style={{ marginRight: '2px' }} /> Acoplar ({selectedCardIds.length})
+              </button>
+              <button 
+                className="btn-action btn-red" 
+                onClick={handleDiscard}
+                disabled={selectedCardIds.length !== 1}
+                style={{ flex: '1 1 98%', fontSize: '0.7rem', padding: '4px 4px', height: '26px', justifyContent: 'center' }}
+              >
+                <ArrowUp size={12} style={{ marginRight: '4px' }} /> Descartar
+              </button>
+            </div>
+          )}
+
+          {/* Botón de Ordenar (Siempre visible, ultra compacto) */}
+          <button 
+            className="btn-action btn-gray" 
+            onClick={handleSortHand}
+            disabled={localHand.length === 0}
+            style={{ width: '100%', fontSize: '0.75rem', padding: '4px 6px', height: '26px', justifyContent: 'center' }}
+          >
+            <SortAsc size={12} style={{ marginRight: '4px' }} /> Ordenar Mano
+          </button>
+        </div>
+      </div>
+
       {/* PANEL LATERAL (INFORMACION, LOGS Y PUNTAJES) */}
       <div className="sidebar">
         
@@ -586,102 +671,6 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           </div>
         </div>
 
-        {/* PANEL DE ACCIONES DEL JUEGO */}
-        <div className="sidebar-section" style={{ borderTop: '1px solid var(--glass-border)', background: 'rgba(16, 185, 129, 0.05)', padding: '12px' }}>
-          <h2 className="sidebar-title" style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', marginBottom: '10px' }}>
-            🎮 ACCIONES DEL JUEGO
-          </h2>
-
-          {/* Indicador de Turno */}
-          <div style={{ marginBottom: '8px' }}>
-            <span className={`badge-info ${isMyTurn ? 'active-turn-badge' : ''}`} style={{ fontSize: '0.75rem', padding: '6px', width: '100%', display: 'inline-block', textAlign: 'center', borderRadius: '6px', fontWeight: 'bold' }}>
-              {isMyTurn ? (needToDraw ? '🚨 ROBAR CARTA' : '👉 TU TURNO (JUGAR / DESCARTAR)') : '⏳ ESPERANDO TURNO RIVAL'}
-            </span>
-          </div>
-
-          {/* Estado del Muerto */}
-          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
-            <span>Tu Estado:</span>
-            <span style={{ color: myPlayer?.hasTakenMorto ? '#10b981' : '#fbbf24', fontWeight: 600 }}>
-              {myPlayer?.hasTakenMorto ? 'Ya tenés Muerto' : 'Muerto disponible'}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-            {/* Controles de Robo */}
-            {isMyTurn && needToDraw && (
-              <>
-                <button 
-                  className="btn-action btn-blue" 
-                  onClick={handleDrawCard}
-                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
-                >
-                  <ArrowDown size={14} style={{ marginRight: '6px' }} /> Robar Mazo
-                </button>
-                <button 
-                  className="btn-action btn-blue" 
-                  onClick={handleDrawDiscard}
-                  disabled={myPlayer?.melds.length === 0}
-                  style={{ 
-                    width: '100%', 
-                    justifyContent: 'center', 
-                    fontSize: '0.8rem', 
-                    padding: '6px 12px',
-                    opacity: myPlayer?.melds.length === 0 ? 0.5 : 1,
-                    cursor: myPlayer?.melds.length === 0 ? 'not-allowed' : 'pointer'
-                  }}
-                  title={myPlayer?.melds.length === 0 ? "No puedes robar del pozo hasta haber bajado al menos un juego" : `Robar pozo (${gameState.discardPile.length} cartas)`}
-                >
-                  <ArrowDown size={14} style={{ marginRight: '6px' }} /> Robar Pozo ({gameState.discardPile.length})
-                </button>
-              </>
-            )}
-
-            {/* Controles de Juego */}
-            {canPlay && (
-              <>
-                <button 
-                  className="btn-action btn-green" 
-                  onClick={handleMeldSequence}
-                  disabled={selectedCardIds.length < 3}
-                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
-                  title="Bajar una secuencia de al menos 3 cartas"
-                >
-                  <PlusCircle size={14} style={{ marginRight: '6px' }} /> Bajar Juego
-                </button>
-                <button 
-                  className="btn-action btn-green" 
-                  onClick={handleAppendToMeld}
-                  disabled={selectedMeldIndex === null || selectedCardIds.length === 0}
-                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
-                  title="Agregar cartas seleccionadas al juego elegido en la mesa"
-                >
-                  <FolderPlus size={14} style={{ marginRight: '6px' }} /> Acoplar ({selectedCardIds.length})
-                </button>
-                <button 
-                  className="btn-action btn-red" 
-                  onClick={handleDiscard}
-                  disabled={selectedCardIds.length !== 1}
-                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
-                  title="Descartar una carta para terminar tu turno"
-                >
-                  <ArrowUp size={14} style={{ marginRight: '6px' }} /> Descartar Carta
-                </button>
-              </>
-            )}
-
-            {/* Ordenar mano */}
-            <button 
-              className="btn-action btn-gray" 
-              onClick={handleSortHand}
-              disabled={localHand.length === 0}
-              style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
-              title="Ordenar cartas en tu mano"
-            >
-              <SortAsc size={14} style={{ marginRight: '6px' }} /> Ordenar Mi Mano
-            </button>
-          </div>
-        </div>
 
         {/* Planilla Histórica de Rondas */}
         {gameState.roundHistory && gameState.roundHistory.length > 0 && (
