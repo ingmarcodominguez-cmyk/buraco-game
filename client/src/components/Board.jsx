@@ -414,7 +414,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                   overflowY: 'hidden',
                   maxWidth: '450px',
                   minWidth: '82px',
-                  height: '118px',
+                  height: '95px', /* Reducido de 118px */
                   padding: '4px 6px',
                   background: 'rgba(0, 0, 0, 0.25)',
                   borderRadius: '12px',
@@ -444,15 +444,15 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               <div 
                 className="playing-card" 
                 style={{ 
-                  width: '72px',
-                  height: '106px',
+                  width: '58px', /* Reducido de 72px */
+                  height: '85px', /* Reducido de 106px */
                   background: 'rgba(0,0,0,0.15)', 
                   border: '2px dashed rgba(255,255,255,0.1)', 
                   display: 'flex', 
                   alignItems: 'center', 
                   justifyContent: 'center',
                   color: '#64748b',
-                  fontSize: '0.8rem',
+                  fontSize: '0.7rem',
                   borderRadius: '8px'
                 }}
               >
@@ -501,90 +501,6 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
       {/* MI MANO Y ACCIONES (PARTE INFERIOR) */}
       <div className="player-hand-container">
-        
-        {/* Barra de Acciones */}
-        <div className="hand-actions-bar">
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-            <span className={`badge-info ${isMyTurn ? 'active-turn-badge' : ''}`} style={{ fontSize: '0.85rem', padding: '4px 10px' }}>
-              {isMyTurn ? (needToDraw ? 'ROBAR CARTA' : 'TU TURNO (JUGAR / DESCARTAR)') : 'ESPERANDO TURNO RIVAL'}
-            </span>
-            <span className="badge-info">
-              {myPlayer?.hasTakenMorto ? 'Ya tenés Muerto' : 'Muerto disponible'}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {/* Ordenar Mano */}
-            <button 
-              className="btn-action btn-gray" 
-              onClick={handleSortHand}
-              disabled={localHand.length === 0}
-              title="Ordenar cartas en tu mano"
-            >
-              <SortAsc size={16} /> Ordenar
-            </button>
-
-            {/* Robar Mazo */}
-            {isMyTurn && needToDraw && (
-              <button className="btn-action btn-blue" onClick={handleDrawCard}>
-                <ArrowDown size={16} /> Robar Mazo
-              </button>
-            )}
-
-            {/* Robar Pozo */}
-            {isMyTurn && needToDraw && gameState.discardPile.length > 0 && (
-              <button 
-                className="btn-action btn-blue" 
-                onClick={handleDrawDiscard}
-                disabled={myPlayer?.melds.length === 0}
-                title={myPlayer?.melds.length === 0 ? "No puedes robar del pozo hasta haber bajado al menos un juego" : `Robar pozo (${gameState.discardPile.length} cartas)`}
-                style={{
-                  opacity: myPlayer?.melds.length === 0 ? 0.5 : 1,
-                  cursor: myPlayer?.melds.length === 0 ? 'not-allowed' : 'pointer'
-                }}
-              >
-                <ArrowDown size={16} /> Robar Pozo ({gameState.discardPile.length})
-              </button>
-            )}
-
-            {/* Bajar Juego */}
-            {canPlay && (
-              <button 
-                className="btn-action btn-green" 
-                onClick={handleMeldSequence}
-                disabled={selectedCardIds.length < 3}
-                title="Bajar una secuencia de al menos 3 cartas"
-              >
-                <PlusCircle size={16} /> Bajar Juego
-              </button>
-            )}
-
-            {/* Acoplar a Juego */}
-            {canPlay && (
-              <button 
-                className="btn-action btn-green" 
-                onClick={handleAppendToMeld}
-                disabled={selectedMeldIndex === null || selectedCardIds.length === 0}
-                title="Agregar cartas seleccionadas al juego elegido en la mesa"
-              >
-                <FolderPlus size={16} /> Acoplar ({selectedCardIds.length})
-              </button>
-            )}
-
-            {/* Descartar */}
-            {canPlay && (
-              <button 
-                className="btn-action btn-red" 
-                onClick={handleDiscard}
-                disabled={selectedCardIds.length !== 1}
-                title="Descartar una carta para terminar tu turno"
-              >
-                <ArrowUp size={16} /> Descartar
-              </button>
-            )}
-          </div>
-        </div>
-
         {/* Visualización de Cartas en Mano */}
         <div className="hand-scroll-area">
           {localHand.map((card, idx) => {
@@ -667,6 +583,103 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           </div>
           <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px' }}>
             Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canastra' : 'Canastras'} para ganar</span>
+          </div>
+        </div>
+
+        {/* PANEL DE ACCIONES DEL JUEGO */}
+        <div className="sidebar-section" style={{ borderTop: '1px solid var(--glass-border)', background: 'rgba(16, 185, 129, 0.05)', padding: '12px' }}>
+          <h2 className="sidebar-title" style={{ color: '#10b981', display: 'flex', alignItems: 'center', gap: '6px', fontSize: '0.85rem', marginBottom: '10px' }}>
+            🎮 ACCIONES DEL JUEGO
+          </h2>
+
+          {/* Indicador de Turno */}
+          <div style={{ marginBottom: '8px' }}>
+            <span className={`badge-info ${isMyTurn ? 'active-turn-badge' : ''}`} style={{ fontSize: '0.75rem', padding: '6px', width: '100%', display: 'inline-block', textAlign: 'center', borderRadius: '6px', fontWeight: 'bold' }}>
+              {isMyTurn ? (needToDraw ? '🚨 ROBAR CARTA' : '👉 TU TURNO (JUGAR / DESCARTAR)') : '⏳ ESPERANDO TURNO RIVAL'}
+            </span>
+          </div>
+
+          {/* Estado del Muerto */}
+          <div style={{ fontSize: '0.75rem', color: '#94a3b8', marginBottom: '10px', display: 'flex', justifyContent: 'space-between' }}>
+            <span>Tu Estado:</span>
+            <span style={{ color: myPlayer?.hasTakenMorto ? '#10b981' : '#fbbf24', fontWeight: 600 }}>
+              {myPlayer?.hasTakenMorto ? 'Ya tenés Muerto' : 'Muerto disponible'}
+            </span>
+          </div>
+
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {/* Controles de Robo */}
+            {isMyTurn && needToDraw && (
+              <>
+                <button 
+                  className="btn-action btn-blue" 
+                  onClick={handleDrawCard}
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
+                >
+                  <ArrowDown size={14} style={{ marginRight: '6px' }} /> Robar Mazo
+                </button>
+                <button 
+                  className="btn-action btn-blue" 
+                  onClick={handleDrawDiscard}
+                  disabled={myPlayer?.melds.length === 0}
+                  style={{ 
+                    width: '100%', 
+                    justifyContent: 'center', 
+                    fontSize: '0.8rem', 
+                    padding: '6px 12px',
+                    opacity: myPlayer?.melds.length === 0 ? 0.5 : 1,
+                    cursor: myPlayer?.melds.length === 0 ? 'not-allowed' : 'pointer'
+                  }}
+                  title={myPlayer?.melds.length === 0 ? "No puedes robar del pozo hasta haber bajado al menos un juego" : `Robar pozo (${gameState.discardPile.length} cartas)`}
+                >
+                  <ArrowDown size={14} style={{ marginRight: '6px' }} /> Robar Pozo ({gameState.discardPile.length})
+                </button>
+              </>
+            )}
+
+            {/* Controles de Juego */}
+            {canPlay && (
+              <>
+                <button 
+                  className="btn-action btn-green" 
+                  onClick={handleMeldSequence}
+                  disabled={selectedCardIds.length < 3}
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
+                  title="Bajar una secuencia de al menos 3 cartas"
+                >
+                  <PlusCircle size={14} style={{ marginRight: '6px' }} /> Bajar Juego
+                </button>
+                <button 
+                  className="btn-action btn-green" 
+                  onClick={handleAppendToMeld}
+                  disabled={selectedMeldIndex === null || selectedCardIds.length === 0}
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
+                  title="Agregar cartas seleccionadas al juego elegido en la mesa"
+                >
+                  <FolderPlus size={14} style={{ marginRight: '6px' }} /> Acoplar ({selectedCardIds.length})
+                </button>
+                <button 
+                  className="btn-action btn-red" 
+                  onClick={handleDiscard}
+                  disabled={selectedCardIds.length !== 1}
+                  style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
+                  title="Descartar una carta para terminar tu turno"
+                >
+                  <ArrowUp size={14} style={{ marginRight: '6px' }} /> Descartar Carta
+                </button>
+              </>
+            )}
+
+            {/* Ordenar mano */}
+            <button 
+              className="btn-action btn-gray" 
+              onClick={handleSortHand}
+              disabled={localHand.length === 0}
+              style={{ width: '100%', justifyContent: 'center', fontSize: '0.8rem', padding: '6px 12px' }}
+              title="Ordenar cartas en tu mano"
+            >
+              <SortAsc size={14} style={{ marginRight: '6px' }} /> Ordenar Mi Mano
+            </button>
           </div>
         </div>
 
