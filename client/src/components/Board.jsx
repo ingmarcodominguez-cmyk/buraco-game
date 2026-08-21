@@ -429,7 +429,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                     <div 
                       key={card.id || idx}
                       style={{
-                        marginRight: idx === list.length - 1 ? '0px' : '-46px',
+                        marginRight: idx === list.length - 1 ? '0px' : '-40px',
                         boxShadow: '0 2px 4px rgba(0,0,0,0.3)',
                         pointerEvents: 'none',
                         zIndex: idx
