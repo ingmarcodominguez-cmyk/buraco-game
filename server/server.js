@@ -920,11 +920,20 @@ function runBotTurn(botIdx) {
     do {
       tempAppended = false;
       for (let mIdx = 0; mIdx < tempMelds.length; mIdx++) {
+        const currentMeld = tempMelds[mIdx];
+        const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c.isUsedAsWildcard);
+
         for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
           const card = tempHand[cIdx];
-          const combined = [...tempMelds[mIdx], card];
-          if (validateMeld(combined).valid) {
-            tempMelds[mIdx] = combined;
+          const combined = [...currentMeld, card];
+          const result = validateMeld(combined);
+          if (result.valid) {
+            const isNewClean = !result.cards.some(c => c.isUsedAsWildcard);
+            if (isCurrentCleanCanastra && !isNewClean) {
+              continue; // No ensuciar una canastra limpia existente en la simulación
+            }
+
+            tempMelds[mIdx] = result.cards;
             tempHand.splice(cIdx, 1);
             cardsPlayedCount++;
             tempAppended = true;
@@ -1014,6 +1023,9 @@ function runBotTurn(botIdx) {
         const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
 
         for (let mIdx = 0; mIdx < botMelds.length; mIdx++) {
+          const currentMeld = botMelds[mIdx];
+          const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c.isUsedAsWildcard);
+
           for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
             const card = botHand[cIdx];
 
@@ -1022,9 +1034,14 @@ function runBotTurn(botIdx) {
               continue;
             }
 
-            const combined = [...botMelds[mIdx], card];
+            const combined = [...currentMeld, card];
             const result = validateMeld(combined);
             if (result.valid) {
+              const isNewClean = !result.cards.some(c => c.isUsedAsWildcard);
+              if (isCurrentCleanCanastra && !isNewClean) {
+                continue; // Evitar ensuciar una canastra limpia convirtiéndola en sucia
+              }
+
               botMelds[mIdx] = result.cards;
               botHand.splice(cIdx, 1);
               appendedAny = true;
