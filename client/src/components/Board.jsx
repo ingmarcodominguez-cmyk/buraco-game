@@ -295,6 +295,11 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     ? gameState.discardPile[gameState.discardPile.length - 1] 
     : null;
 
+  const myMeldPoints = myPlayer?.melds?.reduce((sum, meld) => 
+    sum + meld.reduce((mSum, c) => mSum + (CARD_VALUES[c.rank] || 0), 0)
+  , 0) || 0;
+  const hasUnlockedDiscard = myMeldPoints >= 30;
+
   return (
     <div className="board-container">
       {startingAlert && (
@@ -406,9 +411,9 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             {gameState.discardPile.length > 0 ? (
               <div 
                 className="discard-fan-container" 
-                onClick={isMyTurn && needToDraw && myPlayer?.melds.length > 0 ? handleDrawDiscard : null}
+                onClick={isMyTurn && needToDraw && hasUnlockedDiscard ? handleDrawDiscard : null}
                 style={{ 
-                  cursor: isMyTurn && needToDraw && myPlayer?.melds.length > 0 ? 'pointer' : 'not-allowed',
+                  cursor: isMyTurn && needToDraw && hasUnlockedDiscard ? 'pointer' : 'not-allowed',
                   display: 'flex',
                   overflowX: 'auto',
                   overflowY: 'hidden',
@@ -421,7 +426,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                   border: '1px solid var(--glass-border)',
                   alignItems: 'center'
                 }}
-                title={myPlayer?.melds.length === 0 ? "No puedes robar del pozo hasta haber bajado al menos un juego" : ""}
+                title={!hasUnlockedDiscard ? `No puedes robar del pozo hasta haber bajado al menos 30 puntos (tienes ${myMeldPoints} pts)` : ""}
               >
                 {(() => {
                   const list = animatingDiscard ? gameState.discardPile.slice(0, -1) : gameState.discardPile;
@@ -589,16 +594,16 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               <button 
                 className="btn-action btn-blue" 
                 onClick={handleDrawDiscard}
-                disabled={myPlayer?.melds.length === 0}
+                disabled={!hasUnlockedDiscard}
                 style={{ 
                   flex: 1, 
                   fontSize: '0.88rem', 
                   padding: '6px 10px', 
                   height: '35px', 
                   justifyContent: 'center',
-                  opacity: myPlayer?.melds.length === 0 ? 0.5 : 1
+                  opacity: !hasUnlockedDiscard ? 0.5 : 1
                 }}
-                title={myPlayer?.melds.length === 0 ? "Bájate primero" : `Robar pozo (${gameState.discardPile.length})`}
+                title={!hasUnlockedDiscard ? `Debes tener al menos 30 puntos en mesa para robar el pozo (tienes ${myMeldPoints} pts)` : `Robar pozo (${gameState.discardPile.length})`}
               >
                 <ArrowDown size={14} style={{ marginRight: '4px' }} /> Pozo ({gameState.discardPile.length})
               </button>

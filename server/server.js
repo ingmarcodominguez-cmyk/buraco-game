@@ -299,8 +299,15 @@ io.on('connection', (socket) => {
     }
 
     const player = gameState.players[pIdx];
-    if (player.melds.length === 0) {
-      socket.emit('error-message', 'No puedes levantar del pozo hasta haber bajado al menos un juego a la mesa.');
+    let totalMeldPoints = 0;
+    player.melds.forEach(meld => {
+      meld.forEach(c => {
+        totalMeldPoints += CARD_VALUES[c.rank] || 0;
+      });
+    });
+
+    if (totalMeldPoints < 30) {
+      socket.emit('error-message', `No puedes levantar del pozo hasta haber sumado al menos 30 puntos en tus juegos bajados (actualmente tienes ${totalMeldPoints} pts en mesa).`);
       return;
     }
 
@@ -358,18 +365,7 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Regla de Bajada Inicial de 30 puntos
     const player = gameState.players[pIdx];
-    if (player.melds.length === 0) {
-      let meldSum = 0;
-      cards.forEach(c => {
-        meldSum += CARD_VALUES[c.rank] || 0;
-      });
-      if (meldSum < 30) {
-        socket.emit('error-message', `La bajada inicial debe sumar al menos 30 puntos (Tu juego suma ${meldSum} pts).`);
-        return;
-      }
-    }
 
     // Restricción de cartas en mano al bajar juego
     const hasTakenMorto = gameState.mortosTaken[pIdx];
@@ -837,8 +833,14 @@ function runBotTurn(botIdx) {
   // FASE 1: ROBAR
   let drewFromDiscard = false;
   if (topDiscard && gameState.discardPile.length > 0) {
-    // Regla: no se puede levantar del pozo si no ha bajado un juego
-    const hasMelded = botPlayer.melds.length > 0;
+    // Regla: no se puede levantar del pozo si no ha sumado al menos 30 puntos en mesa
+    let botMeldPoints = 0;
+    botPlayer.melds.forEach(meld => {
+      meld.forEach(c => {
+        botMeldPoints += CARD_VALUES[c.rank] || 0;
+      });
+    });
+    const hasMelded = botMeldPoints >= 30;
     if (hasMelded) {
       const hasSameSuit = botHand.some(c => c.suit === topDiscard.suit);
       const isWildcard = topDiscard.rank === '2' || topDiscard.rank === 'Joker';
@@ -900,7 +902,13 @@ function runBotTurn(botIdx) {
     const opponentHasMorto = gameState.mortosTaken[opponentIdx];
     const botHasMorto = gameState.mortosTaken[botIdx];
     const deckCount = gameState.drawPile.length;
-    const isAlreadyMelded = botMelds.length > 0;
+    let botMeldPoints = 0;
+    botMelds.forEach(meld => {
+      meld.forEach(c => {
+        botMeldPoints += CARD_VALUES[c.rank] || 0;
+      });
+    });
+    const isAlreadyMelded = botMeldPoints >= 30;
 
     // A. Simular jugadas posibles para ver cuántas cartas puede descartar la IA en este turno
     let tempHand = [...botHand];
@@ -1387,11 +1395,6 @@ function tryMeldBotRun(cardsToMeld, botIdx, hasMelded) {
   }
 
   if (result.valid) {
-    if (!hasMelded) {
-      let sum = 0;
-      cardsToMeld.forEach(c => sum += CARD_VALUES[c.rank] || 0);
-      if (sum < 30) return false;
-    }
 
     cardsToMeld.forEach(cardToRem => {
       const idx = botHand.findIndex(hc => hc.id === cardToRem.id);

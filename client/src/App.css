@@ -551,10 +551,12 @@ body {
 
 .hand-scroll-area {
   display: flex;
-  overflow-x: auto;
+  flex-wrap: wrap;
+  overflow-y: auto;
+  max-height: 190px;
   padding: 6px 5px;
   min-height: 105px;
-  gap: 4px;
+  gap: 8px 4px;
 }
 
 /* Selectable card style in hand */
