@@ -149,6 +149,12 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     }
   }, [myHand]);
 
+  // Limpiar IDs seleccionados de cartas que ya no están en la mano
+  useEffect(() => {
+    const currentHandIds = new Set(localHand.map(c => c.id));
+    setSelectedCardIds(prev => prev.filter(id => currentHandIds.has(id)));
+  }, [localHand]);
+
   // Manejo de historial de acciones en el panel lateral
   useEffect(() => {
     if (gameState?.lastAction) {
