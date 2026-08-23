@@ -561,8 +561,8 @@ body {
   flex-wrap: wrap;
   overflow-y: auto;
   max-height: 190px;
-  padding: 6px 5px;
-  min-height: 105px;
+  padding: 24px 5px 6px 5px;
+  min-height: 125px;
   gap: 8px 4px;
 }
 
