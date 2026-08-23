@@ -667,23 +667,23 @@ io.on('connection', (socket) => {
       io.emit('lobby-update', players.map(p => p.name));
     }
 
-    // Si no quedan jugadores humanos conectados, programar limpieza diferida (gracia de 60s en caso de F5 o reconexión)
+    // Si no quedan jugadores humanos conectados, programar limpieza diferida (gracia de 5 minutos en caso de F5 o desconexión)
     const activeHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot);
     if (activeHumans.length === 0) {
-      console.log('Lobby vacío de humanos. Programando limpieza diferida en 60 segundos.');
+      console.log('Lobby vacío de humanos. Programando limpieza diferida en 300 segundos (5 minutos).');
       if (cleanupTimeout) clearTimeout(cleanupTimeout);
       cleanupTimeout = setTimeout(() => {
         // Volver a verificar si sigue vacío antes de borrar
         const stillNoHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot).length === 0;
         if (stillNoHumans) {
-          console.log('Expiró el tiempo de espera (60s). Limpiando estado de Buraco.');
+          console.log('Expiró el tiempo de espera (5 minutos). Limpiando estado de Buraco.');
           players = [];
           gameState = null;
           globalScores = [0, 0];
           isBotThinking = false;
         }
         cleanupTimeout = null;
-      }, 60000); // 60 segundos de gracia
+      }, 300000); // 300 segundos (5 minutos) de gracia
     }
   });
 
@@ -921,14 +921,14 @@ function runBotTurn(botIdx) {
       tempAppended = false;
       for (let mIdx = 0; mIdx < tempMelds.length; mIdx++) {
         const currentMeld = tempMelds[mIdx];
-        const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c.isUsedAsWildcard);
+        const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
 
         for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
           const card = tempHand[cIdx];
           const combined = [...currentMeld, card];
           const result = validateMeld(combined);
           if (result.valid) {
-            const isNewClean = !result.cards.some(c => c.isUsedAsWildcard);
+            const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
             if (isCurrentCleanCanastra && !isNewClean) {
               continue; // No ensuciar una canastra limpia existente en la simulación
             }
@@ -1024,7 +1024,7 @@ function runBotTurn(botIdx) {
 
         for (let mIdx = 0; mIdx < botMelds.length; mIdx++) {
           const currentMeld = botMelds[mIdx];
-          const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c.isUsedAsWildcard);
+          const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
 
           for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
             const card = botHand[cIdx];
@@ -1037,7 +1037,7 @@ function runBotTurn(botIdx) {
             const combined = [...currentMeld, card];
             const result = validateMeld(combined);
             if (result.valid) {
-              const isNewClean = !result.cards.some(c => c.isUsedAsWildcard);
+              const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
               if (isCurrentCleanCanastra && !isNewClean) {
                 continue; // Evitar ensuciar una canastra limpia convirtiéndola en sucia
               }
