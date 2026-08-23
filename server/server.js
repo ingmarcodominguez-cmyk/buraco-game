@@ -651,6 +651,26 @@ io.on('connection', (socket) => {
     sendStateToAll();
   });
 
+  // Cambiar meta de puntos en medio de la partida
+  socket.on('change-target-score', ({ newTargetScore }) => {
+    if (!gameState) return;
+    const scoreVal = parseInt(newTargetScore, 10);
+    if (isNaN(scoreVal) || scoreVal <= 0) {
+      socket.emit('error-message', 'La meta de puntos debe ser un número válido mayor a 0.');
+      return;
+    }
+
+    const previousTarget = gameState.targetScore || 3000;
+    gameState.targetScore = scoreVal;
+    
+    // Obtener el jugador que realizó la acción
+    const pIdx = players.findIndex(p => p.socketId === socket.id);
+    const changerName = pIdx !== -1 ? players[pIdx].name : 'Un jugador';
+    
+    gameState.lastAction = `${changerName} cambió la meta de puntos de ${previousTarget} a ${scoreVal} pts.`;
+    sendStateToAll();
+  });
+
   // Desconexión
   socket.on('disconnect', () => {
     console.log(`Cliente desconectado: ${socket.id}`);

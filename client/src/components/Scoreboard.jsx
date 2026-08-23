@@ -7,7 +7,7 @@ const CARD_VALUES = {
   '8': 10, '9': 10, '10': 10, 'J': 10, 'Q': 10, 'K': 10, 'Joker': 50
 };
 
-export default function Scoreboard({ gameState, playerIndex }) {
+export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore }) {
   if (!gameState) return null;
 
   const opponentIndex = playerIndex === 0 ? 1 : 0;
@@ -89,8 +89,20 @@ export default function Scoreboard({ gameState, playerIndex }) {
           <Award size={18} style={{ color: '#fbbf24' }} />
           <h2 className="sidebar-title" style={{ margin: 0 }}>Puntuación</h2>
         </div>
-        <span style={{ fontSize: '0.75rem', color: '#94a3b8', background: 'rgba(255,255,255,0.08)', padding: '2px 8px', borderRadius: '12px', border: '1px solid rgba(255,255,255,0.1)' }}>
-          Meta: {gameState.targetScore || 3000} pts
+        <span 
+          onClick={onChangeTargetScore}
+          style={{ 
+            fontSize: '0.75rem', 
+            color: '#fbbf24', 
+            background: 'rgba(251,191,36,0.1)', 
+            padding: '2px 8px', 
+            borderRadius: '12px', 
+            border: '1px solid rgba(251,191,36,0.2)',
+            cursor: onChangeTargetScore ? 'pointer' : 'default'
+          }}
+          title={onChangeTargetScore ? "Hacé click para cambiar la meta de puntos" : ""}
+        >
+          Meta: {gameState.targetScore || 3000} pts ✏️
         </span>
       </div>
 

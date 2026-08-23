@@ -303,6 +303,21 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     }
   };
 
+  const handleEditTargetScore = () => {
+    if (gameState.status === 'finished') return;
+    const newScoreStr = window.prompt(
+      "Modificar meta de puntos de la partida:", 
+      gameState.targetScore || 3000
+    );
+    if (newScoreStr === null) return;
+    const newScore = parseInt(newScoreStr, 10);
+    if (!isNaN(newScore) && newScore > 0) {
+      onAction('change-target-score', { newTargetScore: newScore });
+    } else {
+      alert("Por favor ingresa un número válido mayor a 0.");
+    }
+  };
+
   // Obtener última carta del pozo
   const lastDiscardCard = gameState.discardPile.length > 0 
     ? gameState.discardPile[gameState.discardPile.length - 1] 
@@ -723,7 +738,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         )}
 
         {/* Tabla de puntajes */}
-        <Scoreboard gameState={gameState} playerIndex={playerIndex} />
+        <Scoreboard gameState={gameState} playerIndex={playerIndex} onChangeTargetScore={handleEditTargetScore} />
 
         {/* Historial de Acciones / Log de Turnos */}
         <div className="sidebar-section" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
