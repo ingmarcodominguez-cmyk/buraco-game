@@ -115,7 +115,10 @@ function validateSequence(cards) {
       // Buscar carta que encaje perfectamente (mismo rango y palo correspondiente)
       const matchIdx = tempCards.findIndex(c => c.rank === targetRank && c.suit === suit);
       if (matchIdx !== -1) {
-        layout[i] = tempCards[matchIdx];
+        const cardCopy = { ...tempCards[matchIdx] };
+        delete cardCopy.isUsedAsWildcard;
+        delete cardCopy.representedRank;
+        layout[i] = cardCopy;
         tempCards.splice(matchIdx, 1);
       } else {
         wildcardSlots.push(i);

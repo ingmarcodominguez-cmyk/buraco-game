@@ -203,6 +203,19 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     setDraggedIndex(null);
   };
 
+  const handleDropOnMeld = (e, meldIndex) => {
+    e.preventDefault();
+    if (draggedIndex === null) return;
+    const card = localHand[draggedIndex];
+    if (!card) return;
+
+    onAction('append-to-meld', { 
+      meldIndex: meldIndex, 
+      cards: [card] 
+    });
+    setDraggedIndex(null);
+  };
+
   const handleDragEnd = () => {
     setDraggedIndex(null);
   };
@@ -492,6 +505,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             onMeldClick={(idx) => setSelectedMeldIndex(prev => prev === idx ? null : idx)}
             selectedMeldIndex={selectedMeldIndex}
             isOpponent={false} 
+            onDropOnMeld={handleDropOnMeld}
           />
         </div>
 

@@ -2,8 +2,9 @@
 import React from 'react';
 import Card from './Card';
 
-export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOpponent }) {
+export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOpponent, onDropOnMeld }) {
   const isCompact = melds.length >= 3;
+  const [dragOverIndex, setDragOverIndex] = React.useState(null);
 
   return (
     <div className={`melds-container ${isCompact ? 'compact' : ''}`}>
@@ -22,13 +23,35 @@ export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOppo
           const canastraType = isCanastra ? (hasWildcard ? 'suja' : 'limpa') : null;
 
           const isSelected = selectedMeldIndex === idx;
+          const isDragOver = dragOverIndex === idx;
 
           return (
             <div 
               key={idx} 
-              className={`meld-row ${isSelected ? 'selected-target' : ''}`}
+              className={`meld-row ${isSelected ? 'selected-target' : ''} ${isDragOver ? 'drag-over-target' : ''}`}
               onClick={() => onMeldClick && !isOpponent && onMeldClick(idx)}
               style={{ cursor: (!isOpponent && onMeldClick) ? 'pointer' : 'default' }}
+              onDragOver={(e) => {
+                if (!isOpponent && onDropOnMeld) {
+                  e.preventDefault();
+                }
+              }}
+              onDragEnter={() => {
+                if (!isOpponent && onDropOnMeld) {
+                  setDragOverIndex(idx);
+                }
+              }}
+              onDragLeave={() => {
+                if (!isOpponent && onDropOnMeld) {
+                  setDragOverIndex(null);
+                }
+              }}
+              onDrop={(e) => {
+                if (!isOpponent && onDropOnMeld) {
+                  setDragOverIndex(null);
+                  onDropOnMeld(e, idx);
+                }
+              }}
             >
               {isCanastra && (
                 <div className={`canastra-badge ${canastraType}`}>
