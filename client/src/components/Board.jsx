@@ -65,19 +65,20 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
   const logEndRef = useRef(null);
 
+  const safePlayerIndex = typeof playerIndex === 'number' ? playerIndex : 0;
   const is4P = gameState?.is4Player;
-  const myTeamIdx = getTeamOwnerIndex(playerIndex, is4P);
-  const oppTeamIdx = is4P ? (myTeamIdx === 0 ? 1 : 0) : (playerIndex === 0 ? 1 : 0);
+  const myTeamIdx = getTeamOwnerIndex(safePlayerIndex, is4P);
+  const oppTeamIdx = is4P ? (myTeamIdx === 0 ? 1 : 0) : (safePlayerIndex === 0 ? 1 : 0);
   
-  const myPlayer = gameState?.players[playerIndex];
+  const myPlayer = gameState?.players?.[safePlayerIndex];
   const myHand = myPlayer?.hand || [];
-  const opponentIndex = playerIndex === 0 ? 1 : 0;
-  const opponent = gameState?.players[opponentIndex];
+  const opponentIndex = safePlayerIndex === 0 ? 1 : 0;
+  const opponent = gameState?.players?.[opponentIndex];
 
   // Asignar asientos en 4P
-  const leftOppIndex = is4P ? (playerIndex + 1) % 4 : null;
-  const partnerIndex = is4P ? (playerIndex + 2) % 4 : null;
-  const rightOppIndex = is4P ? (playerIndex + 3) % 4 : null;
+  const leftOppIndex = is4P ? (safePlayerIndex + 1) % 4 : null;
+  const partnerIndex = is4P ? (safePlayerIndex + 2) % 4 : null;
+  const rightOppIndex = is4P ? (safePlayerIndex + 3) % 4 : null;
 
   // Rellenar formulario de anotación al terminar la ronda
   useEffect(() => {
@@ -417,21 +418,21 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               textAlign: 'center',
               boxShadow: gameState.turn === leftOppIndex ? '0 0 10px rgba(239, 68, 68, 0.25)' : 'none'
             }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players[leftOppIndex].name}</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players?.[leftOppIndex]?.name || ''}</span>
               <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rival Izq</span>
               
               <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
-                {Array.from({ length: Math.min(5, gameState.players[leftOppIndex].hand.length) }).map((_, i) => (
+                {Array.from({ length: Math.min(5, gameState.players?.[leftOppIndex]?.hand?.length || 0) }).map((_, i) => (
                   <div key={i} className="mini-card-back" />
                 ))}
-                {gameState.players[leftOppIndex].hand.length > 5 && (
+                {(gameState.players?.[leftOppIndex]?.hand?.length || 0) > 5 && (
                   <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
-                    +{gameState.players[leftOppIndex].hand.length - 5}
+                    +{gameState.players?.[leftOppIndex].hand.length - 5}
                   </span>
                 )}
               </div>
               <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
-                {gameState.players[leftOppIndex].hand.length} cartas
+                {gameState.players?.[leftOppIndex]?.hand?.length || 0} cartas
               </span>
               <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[oppTeamIdx] === leftOppIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
                 {gameState.mortosTaken[oppTeamIdx] === leftOppIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
@@ -451,21 +452,21 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               textAlign: 'center',
               boxShadow: gameState.turn === partnerIndex ? '0 0 10px rgba(251, 191, 36, 0.25)' : 'none'
             }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fde047' }}>{gameState.players[partnerIndex].name}</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fde047' }}>{gameState.players?.[partnerIndex]?.name || ''}</span>
               <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Compañero</span>
               
               <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
-                {Array.from({ length: Math.min(5, gameState.players[partnerIndex].hand.length) }).map((_, i) => (
+                {Array.from({ length: Math.min(5, gameState.players?.[partnerIndex]?.hand?.length || 0) }).map((_, i) => (
                   <div key={i} className="mini-card-back" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }} />
                 ))}
-                {gameState.players[partnerIndex].hand.length > 5 && (
+                {(gameState.players?.[partnerIndex]?.hand?.length || 0) > 5 && (
                   <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
-                    +{gameState.players[partnerIndex].hand.length - 5}
+                    +{gameState.players?.[partnerIndex].hand.length - 5}
                   </span>
                 )}
               </div>
               <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
-                {gameState.players[partnerIndex].hand.length} cartas
+                {gameState.players?.[partnerIndex]?.hand?.length || 0} cartas
               </span>
               <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[myTeamIdx] === partnerIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
                 {gameState.mortosTaken[myTeamIdx] === partnerIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
@@ -485,21 +486,21 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               textAlign: 'center',
               boxShadow: gameState.turn === rightOppIndex ? '0 0 10px rgba(239, 68, 68, 0.25)' : 'none'
             }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players[rightOppIndex].name}</span>
+              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players?.[rightOppIndex]?.name || ''}</span>
               <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rival Der</span>
               
               <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
-                {Array.from({ length: Math.min(5, gameState.players[rightOppIndex].hand.length) }).map((_, i) => (
+                {Array.from({ length: Math.min(5, gameState.players?.[rightOppIndex]?.hand?.length || 0) }).map((_, i) => (
                   <div key={i} className="mini-card-back" />
                 ))}
-                {gameState.players[rightOppIndex].hand.length > 5 && (
+                {(gameState.players?.[rightOppIndex]?.hand?.length || 0) > 5 && (
                   <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
-                    +{gameState.players[rightOppIndex].hand.length - 5}
+                    +{gameState.players?.[rightOppIndex].hand.length - 5}
                   </span>
                 )}
               </div>
               <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
-                {gameState.players[rightOppIndex].hand.length} cartas
+                {gameState.players?.[rightOppIndex]?.hand?.length || 0} cartas
               </span>
               <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[oppTeamIdx] === rightOppIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
                 {gameState.mortosTaken[oppTeamIdx] === rightOppIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}

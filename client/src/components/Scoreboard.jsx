@@ -10,14 +10,15 @@ const CARD_VALUES = {
 export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore }) {
   if (!gameState) return null;
 
+  const safePlayerIndex = typeof playerIndex === 'number' ? playerIndex : 0;
   const is4P = gameState.is4Player;
-  const myTeamIdx = is4P ? ((playerIndex === 0 || playerIndex === 2) ? 0 : 1) : playerIndex;
-  const oppTeamIdx = is4P ? (myTeamIdx === 0 ? 1 : 0) : (playerIndex === 0 ? 1 : 0);
-  const opponentIndex = playerIndex === 0 ? 1 : 0;
+  const myTeamIdx = is4P ? ((safePlayerIndex === 0 || safePlayerIndex === 2) ? 0 : 1) : safePlayerIndex;
+  const oppTeamIdx = is4P ? (myTeamIdx === 0 ? 1 : 0) : (safePlayerIndex === 0 ? 1 : 0);
+  const opponentIndex = safePlayerIndex === 0 ? 1 : 0;
 
   const getBreakdown = (teamIdx) => {
     const playersInTeam = is4P ? [teamIdx, teamIdx + 2] : [teamIdx];
-    const player = gameState.players?.[teamIdx] || { melds: [], hand: [] };
+    const player = (typeof teamIdx === 'number' && gameState.players?.[teamIdx]) || { melds: [], hand: [], name: '' };
     
     let meldPoints = 0;
     let cleanCanastras = 0;
@@ -76,7 +77,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
 
     const nameText = is4P
       ? (teamIdx === 0 ? "Pareja 1" : "Pareja 2")
-      : (player.name || `Jugador ${teamIdx + 1}`);
+      : (player?.name || `Jugador ${(typeof teamIdx === 'number' ? teamIdx : 0) + 1}`);
 
     return {
       name: nameText,
