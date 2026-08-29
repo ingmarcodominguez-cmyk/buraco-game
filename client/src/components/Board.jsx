@@ -354,12 +354,15 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     ? gameState.discardPile[gameState.discardPile.length - 1] 
     : null;
 
-  const myMeldsList = is4P ? gameState.players[myTeamIdx].melds : myPlayer?.melds || [];
-  const opponentMeldsList = is4P ? gameState.players[oppTeamIdx].melds : opponent?.melds || [];
+  const myMeldsList = is4P ? gameState.players?.[myTeamIdx]?.melds : myPlayer?.melds || [];
+  const opponentMeldsList = is4P ? gameState.players?.[oppTeamIdx]?.melds : opponent?.melds || [];
   const myMeldsHeaderTitle = is4P ? "Juegos de tu Equipo" : "Tus Juegos Bajados";
   const opponentNameText = is4P 
-    ? `Juegos del Equipo Rival (${gameState.players[oppTeamIdx].name} & ${gameState.players[oppTeamIdx + 2]?.name || ''})`
+    ? `Juegos del Equipo Rival (${gameState.players?.[oppTeamIdx]?.name || ''} & ${gameState.players?.[oppTeamIdx + 2]?.name || ''})`
     : `${opponent?.name || 'Esperando Rival...'} (Rival)`;
+
+  const opponentHandCountText = opponent ? `${opponent.hand?.length || 0} cartas` : '0 cartas';
+  const opponentMortoTaken = is4P ? false : (opponentIndex !== null && gameState.mortosTaken ? !!gameState.mortosTaken[opponentIndex] : false);
 
   const myMeldPoints = myMeldsList.reduce((sum, meld) => 
     sum + meld.reduce((mSum, c) => mSum + (CARD_VALUES[c.rank] || 0), 0)
