@@ -878,7 +878,17 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           {(() => {
             const myTeamUndos = gameState.teamUndoCounts?.[myTeamIdx] || 0;
             const oppTeamUndos = gameState.teamUndoCounts?.[oppTeamIdx] || 0;
-            const canRequestUndo = isMyTurn && !needToDraw && (
+            const isPrevPlayer = safePlayerIndex === (gameState.is4Player 
+              ? (gameState.turn - 1 + 4) % 4 
+              : (gameState.turn === 0 ? 1 : 0)
+            );
+
+            const canRequestUndo = (
+              // Caso 1: Es mi turno, ya robé y estoy jugando
+              (isMyTurn && !needToDraw) ||
+              // Caso 2: El rival acaba de recibir el turno pero aún no robó carta (puedo deshacer mi descarte)
+              (isPrevPlayer && needToDraw)
+            ) && (
               myTeamUndos < 2 &&
               (myTeamUndos === 0 || oppTeamUndos >= 1)
             );

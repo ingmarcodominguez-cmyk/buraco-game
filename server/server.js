@@ -100,12 +100,6 @@ function getTeamOwnerIndex(playerIdx, is4Player) {
 function startPlayerTurn(playerIdx) {
   gameState.turn = playerIdx;
   gameState.turnState = 'draw';
-  
-  // Guardar snapshot de inicio de turno para humanos para permitir deshacer
-  if (gameState.players[playerIdx] && !gameState.players[playerIdx].isBot) {
-    const { turnStartSnapshot, ...snapshotData } = gameState;
-    gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
-  }
 }
 
 function applyUndo(requesterIdx, teamIdx) {
@@ -438,6 +432,12 @@ io.on('connection', (socket) => {
       return;
     }
 
+    // Guardar snapshot de inicio de turno para permitir deshacer
+    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
+      const { turnStartSnapshot, ...snapshotData } = gameState;
+      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
+    }
+
     const card = gameState.drawPile.pop();
     gameState.players[pIdx].hand.push(card);
     gameState.turnState = 'play';
@@ -491,6 +491,12 @@ io.on('connection', (socket) => {
     if (gameState.discardPile.length === 0) {
       socket.emit('error-message', 'El pozo de descarte está vacío.');
       return;
+    }
+
+    // Guardar snapshot de inicio de turno para permitir deshacer
+    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
+      const { turnStartSnapshot, ...snapshotData } = gameState;
+      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
     }
 
     // Agregar todas las cartas del pozo a la mano del jugador
@@ -868,13 +874,25 @@ io.on('connection', (socket) => {
     const pIdx = players.findIndex(p => p.socketId === socket.id);
     if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
     
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'No es tu turno.');
-      return;
-    }
-    
-    if (gameState.turnState === 'draw') {
-      socket.emit('error-message', 'No puedes volver atrás un turno que aún no ha comenzado (debes robar primero).');
+    const maxPlayers = gameState.is4Player ? 4 : 2;
+    const isPrevPlayer = pIdx === (gameState.is4Player 
+      ? (gameState.turn - 1 + 4) % 4 
+      : (gameState.turn === 0 ? 1 : 0)
+    );
+
+    const isValidUndoRequest = (
+      // Caso 1: Es su turno y ya robó (está jugando)
+      (gameState.turn === pIdx && gameState.turnState !== 'draw') ||
+      // Caso 2: Es el jugador anterior y el actual no ha robado aún
+      (isPrevPlayer && gameState.turnState === 'draw')
+    );
+
+    if (!isValidUndoRequest) {
+      if (gameState.turn === pIdx && gameState.turnState === 'draw') {
+        socket.emit('error-message', 'No puedes volver atrás un turno que aún no ha comenzado (debes robar primero).');
+      } else {
+        socket.emit('error-message', 'No puedes solicitar deshacer en este momento.');
+      }
       return;
     }
 
