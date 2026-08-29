@@ -7,12 +7,13 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
   const [requiredCanastras, setRequiredCanastras] = useState(1);
   const [targetScore, setTargetScore] = useState(3000);
   const [playAgainstBot, setPlayAgainstBot] = useState(false);
+  const [is4Player, setIs4Player] = useState(false);
   const [joined, setJoined] = useState(false);
 
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onJoin(name.trim(), requiredCanastras, playAgainstBot, targetScore);
+    onJoin(name.trim(), requiredCanastras, playAgainstBot, targetScore, is4Player);
     setJoined(true);
   };
 
@@ -20,7 +21,7 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
     <div className="lobby-container">
       <div className="lobby-card glass-panel">
         <h1 className="lobby-logo">BURACO</h1>
-        <p className="lobby-subtitle">Juego de cartas multijugador para 2 notebooks</p>
+        <p className="lobby-subtitle">Juego de cartas multijugador para 2 o 4 notebooks</p>
 
         {!joined ? (
           <form onSubmit={handleSubmit}>
@@ -41,6 +42,24 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                 required
                 autoFocus
               />
+            </div>
+
+            <div className="form-group">
+              <label className="form-label" htmlFor="player-count">
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Users size={16} /> Modo de Juego
+                </span>
+              </label>
+              <select
+                id="player-count"
+                className="input-text"
+                value={is4Player ? '4' : '2'}
+                onChange={(e) => setIs4Player(e.target.value === '4')}
+                style={{ cursor: 'pointer' }}
+              >
+                <option value="2">2 Jugadores (1 vs 1)</option>
+                <option value="4">4 Jugadores (2 vs 2 por Parejas)</option>
+              </select>
             </div>
 
             <div className="form-group">
@@ -86,7 +105,7 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                 type="submit"
                 onClick={() => setPlayAgainstBot(false)}
               >
-                Ingresar al Juego <ArrowRight size={18} style={{ marginLeft: '8px', display: 'inline-block', verticalAlign: 'middle' }} />
+                {is4Player ? 'Ingresar a Partida de 4' : 'Ingresar al Juego'} <ArrowRight size={18} style={{ marginLeft: '8px', display: 'inline-block', verticalAlign: 'middle' }} />
               </button>
               
               <button 
@@ -95,7 +114,7 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                 onClick={() => setPlayAgainstBot(true)}
                 style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', boxShadow: '0 4px 14px rgba(59, 130, 246, 0.3)' }}
               >
-                Jugar contra la PC (IA) <ArrowRight size={18} style={{ marginLeft: '8px', display: 'inline-block', verticalAlign: 'middle' }} />
+                {is4Player ? 'Jugar con Compañero Bot (IA)' : 'Jugar contra la PC (IA)'} <ArrowRight size={18} style={{ marginLeft: '8px', display: 'inline-block', verticalAlign: 'middle' }} />
               </button>
             </div>
           </form>
@@ -106,7 +125,12 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                 <div className={`status-dot ${connected ? 'connected' : ''}`}></div>
                 <span>{connected ? 'Conectado al servidor' : 'Conectando al servidor...'}</span>
               </div>
-              <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>Esperando al segundo jugador...</p>
+              <p style={{ color: '#94a3b8', fontSize: '0.85rem' }}>
+                {is4Player 
+                  ? (playAgainstBot ? 'Esperando al segundo jugador (Humano)...' : 'Esperando a que se unan 4 jugadores...')
+                  : 'Esperando al segundo jugador...'
+                }
+              </p>
             </div>
 
             <div className="lobby-players-list">

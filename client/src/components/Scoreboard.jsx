@@ -10,10 +10,14 @@ const CARD_VALUES = {
 export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore }) {
   if (!gameState) return null;
 
+  const is4P = gameState.is4Player;
+  const myTeamIdx = is4P ? ((playerIndex === 0 || playerIndex === 2) ? 0 : 1) : playerIndex;
+  const oppTeamIdx = is4P ? (myTeamIdx === 0 ? 1 : 0) : (playerIndex === 0 ? 1 : 0);
   const opponentIndex = playerIndex === 0 ? 1 : 0;
 
-  const getBreakdown = (pIdx) => {
-    const player = gameState.players?.[pIdx] || { melds: [], hand: [] };
+  const getBreakdown = (teamIdx) => {
+    const playersInTeam = is4P ? [teamIdx, teamIdx + 2] : [teamIdx];
+    const player = gameState.players?.[teamIdx] || { melds: [], hand: [] };
     
     let meldPoints = 0;
     let cleanCanastras = 0;
@@ -47,25 +51,35 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
     let roundTotal = 0;
     
     if (gameState.status === 'finished') {
-      if (player.hand) {
-        player.hand.forEach(c => {
-          if (c && c.rank !== 'hidden') {
-            handPoints += CARD_VALUES[c.rank] || 0;
-          }
-        });
-      }
+      playersInTeam.forEach(pIdx => {
+        const pObj = gameState.players?.[pIdx];
+        if (pObj && pObj.hand) {
+          pObj.hand.forEach(c => {
+            if (c && c.rank !== 'hidden') {
+              handPoints += CARD_VALUES[c.rank] || 0;
+            }
+          });
+        }
+      });
       
-      const tookMorto = gameState.mortosTaken?.[pIdx];
+      const tookMorto = is4P ? (gameState.mortosTaken?.[teamIdx] !== null) : gameState.mortosTaken?.[teamIdx];
       if (!tookMorto) mortoPenalty = -100;
       
-      const isWinner = gameState.winner === pIdx;
-      if (isWinner) goOutBonus = 100;
+      const winner = gameState.winner;
+      if (winner !== null) {
+        const winnerTeam = is4P ? (winner === 0 || winner === 2 ? 0 : 1) : winner;
+        if (winnerTeam === teamIdx) goOutBonus = 100;
+      }
       
       roundTotal = meldPoints + cleanCanastraPoints + dirtyCanastraPoints + goOutBonus + mortoPenalty - handPoints;
     }
 
+    const nameText = is4P
+      ? (teamIdx === 0 ? "Pareja 1" : "Pareja 2")
+      : (player.name || `Jugador ${teamIdx + 1}`);
+
     return {
-      name: player.name || `Jugador ${pIdx + 1}`,
+      name: nameText,
       meldPoints,
       cleanCanastras,
       cleanCanastraPoints,
@@ -75,12 +89,12 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
       handPoints,
       goOutBonus,
       roundTotal,
-      globalTotal: (gameState.scores && gameState.scores[pIdx]) || 0
+      globalTotal: (gameState.scores && gameState.scores[teamIdx]) || 0
     };
   };
 
-  const myBreakdown = getBreakdown(playerIndex);
-  const oppBreakdown = getBreakdown(opponentIndex);
+  const myBreakdown = getBreakdown(is4P ? myTeamIdx : playerIndex);
+  const oppBreakdown = getBreakdown(is4P ? oppTeamIdx : opponentIndex);
 
   return (
     <div className="sidebar-section">
@@ -110,8 +124,8 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
         <thead>
           <tr>
             <th>Concepto</th>
-            <th>Tú</th>
-            <th>{gameState.players[opponentIndex]?.name || 'Rival'}</th>
+            <th>{is4P ? "Tus Puntos" : "Tú"}</th>
+            <th>{is4P ? "Rivales" : (gameState.players[opponentIndex]?.name || 'Rival')}</th>
           </tr>
         </thead>
         <tbody>

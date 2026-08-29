@@ -20,6 +20,7 @@ export default function App() {
   const [selectedCanastras, setSelectedCanastras] = useState(1);
   const [isAgainstBotSetting, setIsAgainstBotSetting] = useState(false);
   const [selectedTargetScore, setSelectedTargetScore] = useState(3000);
+  const [is4PlayerSetting, setIs4PlayerSetting] = useState(false);
   const [joined, setJoined] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -93,7 +94,7 @@ export default function App() {
     // Manejar re-conexión automática si ya teníamos un nombre ingresado
     socket.on('reconnect', () => {
       if (playerName) {
-        socket.emit('join-lobby', { name: playerName, requiredCanastras: selectedCanastras, isAgainstBot: isAgainstBotSetting, targetScore: selectedTargetScore });
+        socket.emit('join-lobby', { name: playerName, requiredCanastras: selectedCanastras, isAgainstBot: isAgainstBotSetting, targetScore: selectedTargetScore, is4Player: is4PlayerSetting });
       }
     });
 
@@ -117,13 +118,14 @@ export default function App() {
     }
   }, [errorMessage]);
 
-  const handleJoinLobby = (name, requiredCanastras, playAgainstBot, targetScore) => {
+  const handleJoinLobby = (name, requiredCanastras, playAgainstBot, targetScore, is4Player) => {
     setPlayerName(name);
     setSelectedCanastras(requiredCanastras);
     setIsAgainstBotSetting(playAgainstBot);
     setSelectedTargetScore(targetScore);
+    setIs4PlayerSetting(is4Player);
     setJoined(true);
-    socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore });
+    socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player });
   };
 
   const handleGameAction = (actionName, data = {}) => {

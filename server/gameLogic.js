@@ -277,48 +277,52 @@ function validateMeld(cards) {
 }
 
 // Inicializa el estado del juego para una nueva ronda
-function initGame() {
+function initGame(is4Player = false) {
   const deck = shuffle(createDeck());
 
   const hand0 = [];
   const hand1 = [];
+  const hand2 = [];
+  const hand3 = [];
   const morto0 = [];
   const morto1 = [];
 
-  // Repartir 11 cartas al Jugador 0
+  // Repartir 11 cartas a cada jugador según corresponda
   for (let i = 0; i < 11; i++) hand0.push(deck.pop());
-  // Repartir 11 cartas al Jugador 1
   for (let i = 0; i < 11; i++) hand1.push(deck.pop());
+  if (is4Player) {
+    for (let i = 0; i < 11; i++) hand2.push(deck.pop());
+    for (let i = 0; i < 11; i++) hand3.push(deck.pop());
+  }
 
-  // Crear Muerto 0 (11 cartas)
+  // Crear Muerto 0 (11 cartas) y Muerto 1 (11 cartas)
   for (let i = 0; i < 11; i++) morto0.push(deck.pop());
-  // Crear Muerto 1 (11 cartas)
   for (let i = 0; i < 11; i++) morto1.push(deck.pop());
 
   // Pozo de descarte vacío al iniciar
   const discardPile = [];
 
+  const playersList = [
+    { hand: hand0, melds: [], hasTakenMorto: false, name: '' },
+    { hand: hand1, melds: [], hasTakenMorto: false, name: '' }
+  ];
+
+  if (is4Player) {
+    playersList.push(
+      { hand: hand2, melds: [], hasTakenMorto: false, name: '' },
+      { hand: hand3, melds: [], hasTakenMorto: false, name: '' }
+    );
+  }
+
   return {
     drawPile: deck,
     discardPile,
     mortos: [morto0, morto1],
-    mortosTaken: [false, false],
-    players: [
-      {
-        hand: hand0,
-        melds: [],
-        hasTakenMorto: false,
-        name: ''
-      },
-      {
-        hand: hand1,
-        melds: [],
-        hasTakenMorto: false,
-        name: ''
-      }
-    ],
-    turn: 0,              // Índice del jugador activo (0 o 1)
-    turnState: 'draw',    // 'draw' (debe robar) o 'play' (puede bajar cartas / debe descartar)
+    mortosTaken: is4Player ? [null, null] : [false, false],
+    is4Player,
+    players: playersList,
+    turn: 0,              // Índice del jugador activo
+    turnState: 'draw',    // 'draw' o 'play'
     status: 'playing',    // 'waiting' | 'playing' | 'finished'
     winner: null,
     scores: [0, 0],       // Puntajes acumulados globales
@@ -326,22 +330,24 @@ function initGame() {
     requiredCanastras: 1, // Por defecto 1 canastra para batir
     roundHistory: [],     // Planilla de historial de rondas
     isFirstTurn: true,    // Habilita la regla del primer descarte/re-robo
-    firstDrawnCardId: null, // Guarda la carta robada en el primer turno por si la rechaza
-    lastAction: 'Juego iniciado. Turno del Jugador 1.'
+    firstDrawnCardId: null, // Guarda la carta robada en el primer turno
+    lastAction: 'Juego iniciado.',
+    teamUndoCounts: [0, 0],
+    lastUndoTeam: null
   };
 }
 
 // Calcula los puntajes al finalizar la ronda
 function calculateRoundScores(gameState) {
   const roundScores = [0, 0];
+  const is4P = gameState.is4Player;
 
-  for (let p = 0; p < 2; p++) {
-    const player = gameState.players[p];
+  for (let t = 0; t < 2; t++) {
     let score = 0;
 
-    // 1. Sumar puntos de cartas en los juegos bajados (melds)
-    player.melds.forEach(meld => {
-      // Validamos para saber si es limpia o sucia y sumar puntos de canastra (secuencia o tercio)
+    // 1. Sumar puntos de cartas en los juegos bajados (melds) de la pareja (almacenado en el index t)
+    const teamMelds = gameState.players[t].melds;
+    teamMelds.forEach(meld => {
       const validation = validateMeld(meld);
       if (validation.valid) {
         // Sumar valor de cada carta individual
@@ -360,23 +366,32 @@ function calculateRoundScores(gameState) {
       }
     });
 
-    // 2. Penalizar cartas que quedaron en la mano
-    player.hand.forEach(card => {
-      score -= CARD_VALUES[card.rank];
+    // 2. Penalizar cartas que quedaron en las manos de los integrantes del equipo
+    const playersInTeam = is4P ? [t, t + 2] : [t];
+    playersInTeam.forEach(pIdx => {
+      const player = gameState.players[pIdx];
+      if (player && player.hand) {
+        player.hand.forEach(card => {
+          score -= CARD_VALUES[card.rank];
+        });
+      }
     });
 
-    // 3. Penalización por no haber tomado el Muerto
-    if (!gameState.mortosTaken[p]) {
+    // 3. Penalización por no haber tomado el Muerto de la pareja
+    const tookMorto = is4P ? (gameState.mortosTaken[t] !== null) : gameState.mortosTaken[t];
+    if (!tookMorto) {
       score -= 100;
     }
 
     // 4. Bono por batida (ir al final de la ronda)
-    // El jugador que bate es el que se quedó sin cartas y causó el fin de la partida
-    if (gameState.status === 'finished' && gameState.winner === p) {
-      score += 100;
+    if (gameState.status === 'finished' && gameState.winner !== null) {
+      const winnerTeam = is4P ? (gameState.winner === 0 || gameState.winner === 2 ? 0 : 1) : gameState.winner;
+      if (winnerTeam === t) {
+        score += 100;
+      }
     }
 
-    roundScores[p] = score;
+    roundScores[t] = score;
   }
 
   return roundScores;

@@ -20,6 +20,11 @@ const calcTotal = (mesa, limpias, sucias, mano, cierre, sinMuerto) => {
   return pointsMesa + pointsLimpias + pointsSucias + pointsCierre + penaltyMuerto - pointsMano;
 };
 
+const getTeamOwnerIndex = (idx, is4Player) => {
+  if (!is4Player) return idx;
+  return idx === 0 || idx === 2 ? 0 : 1;
+};
+
 export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }) {
   const [prevGameState, setPrevGameState] = useState(null);
   const [animatingDiscard, setAnimatingDiscard] = useState(null);
@@ -60,16 +65,26 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
   const logEndRef = useRef(null);
 
+  const is4P = gameState?.is4Player;
+  const myTeamIdx = getTeamOwnerIndex(playerIndex, is4P);
+  const oppTeamIdx = is4P ? (myTeamIdx === 0 ? 1 : 0) : (playerIndex === 0 ? 1 : 0);
+  
   const myPlayer = gameState?.players[playerIndex];
   const myHand = myPlayer?.hand || [];
   const opponentIndex = playerIndex === 0 ? 1 : 0;
   const opponent = gameState?.players[opponentIndex];
 
+  // Asignar asientos en 4P
+  const leftOppIndex = is4P ? (playerIndex + 1) % 4 : null;
+  const partnerIndex = is4P ? (playerIndex + 2) % 4 : null;
+  const rightOppIndex = is4P ? (playerIndex + 3) % 4 : null;
+
   // Rellenar formulario de anotación al terminar la ronda
   useEffect(() => {
     if (gameState?.status === 'finished') {
-      const getDefaults = (pIdx) => {
-        const player = gameState.players?.[pIdx] || { melds: [], hand: [] };
+      const getDefaults = (teamIdx) => {
+        const teamOwner = getTeamOwnerIndex(teamIdx, is4P);
+        const player = gameState.players?.[teamOwner] || { melds: [], hand: [] };
         let meldPoints = 0;
         let cleanCanastras = 0;
         let dirtyCanastras = 0;
@@ -90,16 +105,25 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         }
 
         let handPoints = 0;
-        if (player.hand) {
-          player.hand.forEach(c => {
-            if (c && c.rank !== 'hidden') {
-              handPoints += CARD_VALUES[c.rank] || 0;
-            }
-          });
-        }
+        const playersInTeam = is4P ? [teamIdx, teamIdx + 2] : [teamIdx];
+        playersInTeam.forEach(pIdx => {
+          const pObj = gameState.players?.[pIdx];
+          if (pObj && pObj.hand) {
+            pObj.hand.forEach(c => {
+              if (c && c.rank !== 'hidden') {
+                handPoints += CARD_VALUES[c.rank] || 0;
+              }
+            });
+          }
+        });
 
-        const tookMorto = gameState.mortosTaken?.[pIdx];
-        const isWinner = gameState.winner === pIdx;
+        const tookMorto = is4P ? (gameState.mortosTaken?.[teamIdx] !== null) : gameState.mortosTaken?.[teamIdx];
+        const winner = gameState.winner;
+        let isWinner = false;
+        if (winner !== null) {
+          const winnerTeam = is4P ? (winner === 0 || winner === 2 ? 0 : 1) : winner;
+          isWinner = winnerTeam === teamIdx;
+        }
 
         return {
           mesa: meldPoints,
@@ -329,7 +353,14 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
     ? gameState.discardPile[gameState.discardPile.length - 1] 
     : null;
 
-  const myMeldPoints = myPlayer?.melds?.reduce((sum, meld) => 
+  const myMeldsList = is4P ? gameState.players[myTeamIdx].melds : myPlayer?.melds || [];
+  const opponentMeldsList = is4P ? gameState.players[oppTeamIdx].melds : opponent?.melds || [];
+  const myMeldsHeaderTitle = is4P ? "Juegos de tu Equipo" : "Tus Juegos Bajados";
+  const opponentNameText = is4P 
+    ? `Juegos del Equipo Rival (${gameState.players[oppTeamIdx].name} & ${gameState.players[oppTeamIdx + 2]?.name || ''})`
+    : `${opponent?.name || 'Esperando Rival...'} (Rival)`;
+
+  const myMeldPoints = myMeldsList.reduce((sum, meld) => 
     sum + meld.reduce((mSum, c) => mSum + (CARD_VALUES[c.rank] || 0), 0)
   , 0) || 0;
   const hasUnlockedDiscard = myMeldPoints >= 30;
@@ -359,62 +390,226 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
       {/* AREA DE JUEGO PRINCIPAL */}
       <div className="main-playarea">
         
+        {/* En modo 4 jugadores, mostramos los otros 3 jugadores distribuidos en sus asientos */}
+        {is4P && (
+          <div className="multiplayer-seats-container" style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            padding: '10px 16px',
+            background: 'rgba(15, 23, 42, 0.4)',
+            borderRadius: '12px',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            marginBottom: '12px',
+            gap: '12px',
+            backdropFilter: 'blur(10px)'
+          }}>
+            {/* Jugador Izquierda: Rival Líder */}
+            <div className={`seat-card ${gameState.turn === leftOppIndex ? 'active-seat' : ''}`} style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              padding: '8px',
+              borderRadius: '8px',
+              background: 'rgba(30, 41, 59, 0.3)',
+              border: gameState.turn === leftOppIndex ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.05)',
+              textAlign: 'center',
+              boxShadow: gameState.turn === leftOppIndex ? '0 0 10px rgba(239, 68, 68, 0.25)' : 'none'
+            }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players[leftOppIndex].name}</span>
+              <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rival Izq</span>
+              
+              <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
+                {Array.from({ length: Math.min(5, gameState.players[leftOppIndex].hand.length) }).map((_, i) => (
+                  <div key={i} className="mini-card-back" />
+                ))}
+                {gameState.players[leftOppIndex].hand.length > 5 && (
+                  <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
+                    +{gameState.players[leftOppIndex].hand.length - 5}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
+                {gameState.players[leftOppIndex].hand.length} cartas
+              </span>
+              <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[oppTeamIdx] === leftOppIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                {gameState.mortosTaken[oppTeamIdx] === leftOppIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
+              </span>
+            </div>
+
+            {/* Jugador Arriba: Compañero */}
+            <div className={`seat-card ${gameState.turn === partnerIndex ? 'active-seat' : ''}`} style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              padding: '8px',
+              borderRadius: '8px',
+              background: 'rgba(30, 41, 59, 0.3)',
+              border: gameState.turn === partnerIndex ? '1px solid #fbbf24' : '1px solid rgba(255,255,255,0.05)',
+              textAlign: 'center',
+              boxShadow: gameState.turn === partnerIndex ? '0 0 10px rgba(251, 191, 36, 0.25)' : 'none'
+            }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fde047' }}>{gameState.players[partnerIndex].name}</span>
+              <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Compañero</span>
+              
+              <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
+                {Array.from({ length: Math.min(5, gameState.players[partnerIndex].hand.length) }).map((_, i) => (
+                  <div key={i} className="mini-card-back" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }} />
+                ))}
+                {gameState.players[partnerIndex].hand.length > 5 && (
+                  <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
+                    +{gameState.players[partnerIndex].hand.length - 5}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
+                {gameState.players[partnerIndex].hand.length} cartas
+              </span>
+              <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[myTeamIdx] === partnerIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                {gameState.mortosTaken[myTeamIdx] === partnerIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
+              </span>
+            </div>
+
+            {/* Jugador Derecha: Rival Teammate */}
+            <div className={`seat-card ${gameState.turn === rightOppIndex ? 'active-seat' : ''}`} style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              padding: '8px',
+              borderRadius: '8px',
+              background: 'rgba(30, 41, 59, 0.3)',
+              border: gameState.turn === rightOppIndex ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.05)',
+              textAlign: 'center',
+              boxShadow: gameState.turn === rightOppIndex ? '0 0 10px rgba(239, 68, 68, 0.25)' : 'none'
+            }}>
+              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players[rightOppIndex].name}</span>
+              <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rival Der</span>
+              
+              <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
+                {Array.from({ length: Math.min(5, gameState.players[rightOppIndex].hand.length) }).map((_, i) => (
+                  <div key={i} className="mini-card-back" />
+                ))}
+                {gameState.players[rightOppIndex].hand.length > 5 && (
+                  <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
+                    +{gameState.players[rightOppIndex].hand.length - 5}
+                  </span>
+                )}
+              </div>
+              <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
+                {gameState.players[rightOppIndex].hand.length} cartas
+              </span>
+              <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[oppTeamIdx] === rightOppIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
+                {gameState.mortosTaken[oppTeamIdx] === rightOppIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
+              </span>
+            </div>
+          </div>
+        )}
+
         {/* ZONA RIVAL */}
         <div className="player-zone">
           <div className="zone-header">
             <span style={{ fontWeight: 700, color: '#f8fafc' }}>
-              {opponent?.name || 'Esperando Rival...'} (Rival)
+              {opponentNameText}
             </span>
             <div style={{ display: 'flex', gap: '8px' }}>
-              <span className={`badge-info ${!isMyTurn ? 'active-turn-badge' : ''}`}>
-                {!isMyTurn ? 'Su Turno' : 'Esperando'}
-              </span>
+              {!is4P && (
+                <span className={`badge-info ${!isMyTurn ? 'active-turn-badge' : ''}`}>
+                  {!isMyTurn ? 'Su Turno' : 'Esperando'}
+                </span>
+              )}
+              {!is4P && (
+                <span className="badge-info">
+                  {opponentHandCountText}
+                </span>
+              )}
               <span className="badge-info">
-                {opponent?.hand.length || 0} cartas
-              </span>
-              <span className="badge-info">
-                {gameState.mortosTaken[opponentIndex] ? 'Muerto Tomado' : 'Muerto Pendiente'}
+                {opponentMortoTaken ? 'Muerto Tomado' : 'Muerto Pendiente'}
               </span>
             </div>
           </div>
           
           {/* Si la ronda terminó, mostrar la mano del oponente */}
-          {gameState.status === 'finished' && opponent?.hand && opponent.hand.length > 0 && (
-            <div style={{ 
-              display: 'flex', 
-              alignItems: 'center', 
-              gap: '6px', 
-              marginTop: '6px', 
-              padding: '6px 10px', 
-              background: 'rgba(239, 68, 68, 0.1)', 
-              borderRadius: '8px', 
-              border: '1px dashed rgba(239, 68, 68, 0.3)',
-              justifyContent: 'center'
-            }}>
-              <span style={{ fontSize: '0.8rem', color: '#f87171', fontWeight: 'bold', marginRight: '6px' }}>
-                Mano del Rival:
-              </span>
-              <div style={{ display: 'flex', overflowX: 'auto', padding: '2px' }}>
-                {opponent.hand.map((card, idx) => (
-                  <div 
-                    key={card.id || idx}
-                    style={{ 
-                      marginLeft: idx === 0 ? '0px' : '-44px',
-                      transform: 'scale(0.8)',
-                      transformOrigin: 'left center',
-                      boxShadow: '1px 0 4px rgba(0,0,0,0.3)',
-                      zIndex: idx
-                    }}
-                  >
-                    <Card card={card} isHidden={false} />
+          {gameState.status === 'finished' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+              {!is4P ? (
+                opponent?.hand && opponent.hand.length > 0 && (
+                  <div style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '6px', 
+                    padding: '6px 10px', 
+                    background: 'rgba(239, 68, 68, 0.1)', 
+                    borderRadius: '8px', 
+                    border: '1px dashed rgba(239, 68, 68, 0.3)',
+                    justifyContent: 'center'
+                  }}>
+                    <span style={{ fontSize: '0.8rem', color: '#f87171', fontWeight: 'bold', marginRight: '6px' }}>
+                      Mano de {opponent.name}:
+                    </span>
+                    <div style={{ display: 'flex', overflowX: 'auto', padding: '2px' }}>
+                      {opponent.hand.map((card, idx) => (
+                        <div 
+                          key={card.id || idx}
+                          style={{ 
+                            marginLeft: idx === 0 ? '0px' : '-44px',
+                            transform: 'scale(0.8)',
+                            transformOrigin: 'left center',
+                            boxShadow: '1px 0 4px rgba(0,0,0,0.3)',
+                            zIndex: idx
+                          }}
+                        >
+                          <Card card={card} isHidden={false} />
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                ))}
-              </div>
+                )
+              ) : (
+                [leftOppIndex, rightOppIndex].map(oppIdx => {
+                  const oppPlayer = gameState.players[oppIdx];
+                  if (!oppPlayer || !oppPlayer.hand || oppPlayer.hand.length === 0) return null;
+                  return (
+                    <div key={oppIdx} style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      padding: '4px 10px', 
+                      background: 'rgba(239, 68, 68, 0.08)', 
+                      borderRadius: '8px', 
+                      border: '1px dashed rgba(239, 68, 68, 0.25)',
+                      justifyContent: 'center'
+                    }}>
+                      <span style={{ fontSize: '0.78rem', color: '#fca5a5', fontWeight: 'bold', marginRight: '6px' }}>
+                        Mano de {oppPlayer.name}:
+                      </span>
+                      <div style={{ display: 'flex', overflowX: 'auto', padding: '2px' }}>
+                        {oppPlayer.hand.map((card, idx) => (
+                          <div 
+                            key={card.id || idx}
+                            style={{ 
+                              marginLeft: idx === 0 ? '0px' : '-48px',
+                              transform: 'scale(0.72)',
+                              transformOrigin: 'left center',
+                              boxShadow: '1px 0 4px rgba(0,0,0,0.2)',
+                              zIndex: idx
+                            }}
+                          >
+                            <Card card={card} isHidden={false} />
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
             </div>
           )}
           
           <MeldArea 
-            melds={opponent?.melds || []} 
+            melds={opponentMeldsList} 
             isOpponent={true} 
           />
         </div>
@@ -514,7 +709,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         <div className="player-zone">
           <div className="zone-header">
             <span style={{ fontWeight: 700, color: '#f8fafc' }}>
-              Tus Juegos Bajados
+              {myMeldsHeaderTitle}
             </span>
             <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>
               {selectedMeldIndex !== null ? 'Seleccionado para acoplar cartas' : 'Hacé click en un juego para agregarle cartas'}
@@ -522,7 +717,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           </div>
           
           <MeldArea 
-            melds={myPlayer?.melds || []} 
+            melds={myMeldsList} 
             onMeldClick={(idx) => setSelectedMeldIndex(prev => prev === idx ? null : idx)}
             selectedMeldIndex={selectedMeldIndex}
             isOpponent={false} 
@@ -675,15 +870,57 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             </div>
           )}
 
-          {/* Botón de Ordenar */}
-          <button 
-            className="btn-action btn-gray" 
-            onClick={handleSortHand}
-            disabled={localHand.length === 0}
-            style={{ width: '100%', fontSize: '0.82rem', padding: '5px 8px', height: '30px', justifyContent: 'center' }}
-          >
-            <SortAsc size={14} style={{ marginRight: '4px' }} /> Ordenar Mano
-          </button>
+          {/* Botones de Ordenar y Deshacer */}
+          {(() => {
+            const myTeamUndos = gameState.teamUndoCounts?.[myTeamIdx] || 0;
+            const oppTeamUndos = gameState.teamUndoCounts?.[oppTeamIdx] || 0;
+            const canRequestUndo = isMyTurn && !needToDraw && (
+              myTeamUndos < 2 &&
+              (myTeamUndos === 0 || oppTeamUndos >= 1)
+            );
+            const remainingUndos = 2 - myTeamUndos;
+
+            return (
+              <div style={{ display: 'flex', gap: '5px', width: '100%', marginTop: '3px' }}>
+                <button 
+                  className="btn-action btn-gray" 
+                  onClick={handleSortHand}
+                  disabled={localHand.length === 0}
+                  style={{ flex: 1, fontSize: '0.8rem', padding: '5px 4px', height: '32px', justifyContent: 'center' }}
+                >
+                  <SortAsc size={13} style={{ marginRight: '3px' }} /> Ordenar
+                </button>
+                <button 
+                  className="btn-action" 
+                  onClick={() => onAction('request-undo')}
+                  disabled={!canRequestUndo}
+                  style={{ 
+                    flex: 1, 
+                    fontSize: '0.8rem', 
+                    padding: '5px 4px', 
+                    height: '32px', 
+                    justifyContent: 'center',
+                    background: canRequestUndo ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : 'rgba(255, 255, 255, 0.04)',
+                    color: canRequestUndo ? '#ffffff' : '#64748b',
+                    borderColor: canRequestUndo ? '#818cf8' : 'rgba(255, 255, 255, 0.05)',
+                    opacity: !canRequestUndo && (myTeamUndos >= 2 || (myTeamUndos === 1 && oppTeamUndos === 0)) ? 0.4 : 1
+                  }}
+                  title={!canRequestUndo 
+                    ? (myTeamUndos >= 2 
+                        ? "Llegaste al límite de 2 deshacer" 
+                        : (myTeamUndos === 1 && oppTeamUndos === 0 
+                            ? "Esperá a que el rival use su deshacer" 
+                            : "Solo disponible durante tu turno de juego"
+                          )
+                      )
+                    : `Deshacer jugada (Quedan ${remainingUndos} usos)`
+                  }
+                >
+                  ⏪ Deshacer ({remainingUndos})
+                </button>
+              </div>
+            );
+          })()}
         </div>
       </div>
 
@@ -771,18 +1008,18 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 ¡Partida Finalizada!
               </h2>
               <p style={{ color: '#fff', fontSize: '1.1rem', marginBottom: '16px' }}>
-                El ganador es <strong>{gameState.players?.[gameState.winner]?.name || 'Desconocido'}</strong> con <strong>{gameState.scores?.[gameState.winner] || 0}</strong> puntos.
+                El ganador es <strong>{is4P ? (gameState.winner === 0 || gameState.winner === 2 ? `${gameState.players[0].name} & ${gameState.players[2].name}` : `${gameState.players[1].name} & ${gameState.players[3].name}`) : (gameState.players?.[gameState.winner]?.name || 'Desconocido')}</strong> con <strong>{gameState.scores?.[gameState.winner] || 0}</strong> puntos.
               </p>
               
               <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '12px', padding: '16px', marginBottom: '24px' }}>
                 <h3 style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Puntajes Finales</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '1.2rem', fontWeight: 'bold' }}>
                   <div style={{ color: '#10b981' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>{gameState.players?.[0]?.name || 'Jugador 1'}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>{is4P ? "Pareja 1" : (gameState.players?.[0]?.name || 'Jugador 1')}</div>
                     {gameState.scores?.[0] || 0} pts
                   </div>
                   <div style={{ color: '#3b82f6' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>{gameState.players?.[1]?.name || 'Jugador 2'}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>{is4P ? "Pareja 2" : (gameState.players?.[1]?.name || 'Jugador 2')}</div>
                     {gameState.scores?.[1] || 0} pts
                   </div>
                 </div>
@@ -794,8 +1031,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                     <thead>
                       <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
                         <th style={{ padding: '6px 4px', textAlign: 'center' }}>Ronda</th>
-                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>{gameState.players?.[0]?.name || 'J1'}</th>
-                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>{gameState.players?.[1]?.name || 'J2'}</th>
+                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>{is4P ? "Pareja 1" : (gameState.players?.[0]?.name || 'J1')}</th>
+                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>{is4P ? "Pareja 2" : (gameState.players?.[1]?.name || 'J2')}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -828,8 +1065,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '10px', alignItems: 'center', textAlign: 'left', marginBottom: '12px' }}>
               <span style={{ fontWeight: 'bold', color: '#94a3b8', fontSize: '0.85rem' }}>Concepto</span>
-              <span style={{ fontWeight: 'bold', color: '#10b981', textAlign: 'center', fontSize: '0.85rem' }}>{gameState.players?.[0]?.name || 'J1'}</span>
-              <span style={{ fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', fontSize: '0.85rem' }}>{gameState.players?.[1]?.name || 'J2'}</span>
+              <span style={{ fontWeight: 'bold', color: '#10b981', textAlign: 'center', fontSize: '0.85rem' }}>{is4P ? "Pareja 1" : (gameState.players?.[0]?.name || 'J1')}</span>
+              <span style={{ fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', fontSize: '0.85rem' }}>{is4P ? "Pareja 2" : (gameState.players?.[1]?.name || 'J2')}</span>
               
               {/* Puntos en Mesa */}
               <span style={{ fontSize: '0.9rem' }}>Puntos en Mesa (bajada)</span>
@@ -1043,6 +1280,63 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             >
               Descartar y Robar Otra
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE DESHACER JUGADA (UNDO TURN) */}
+      {gameState.undoRequestedBy !== null && (
+        <div className="modal-overlay" style={{ zIndex: 1100 }}>
+          <div className="modal-content glass-panel" style={{ maxWidth: '450px', padding: '24px', textAlign: 'center' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '10px' }}>⏪</div>
+            
+            {gameState.undoRequestedBy === playerIndex ? (
+              <>
+                <h3 className="modal-title" style={{ fontSize: '1.4rem', color: '#fbbf24', marginBottom: '12px' }}>
+                  Solicitud de Retroceso Enviada
+                </h3>
+                <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '20px', lineHeight: '1.5' }}>
+                  Esperando que los rivales aprueben o rechacen volver atrás tu jugada...
+                </p>
+                <div className="loading-spinner-small" style={{ margin: '0 auto 10px auto' }}></div>
+              </>
+            ) : getTeamOwnerIndex(gameState.undoRequestedBy, is4P) === myTeamIdx ? (
+              <>
+                <h3 className="modal-title" style={{ fontSize: '1.4rem', color: '#fbbf24', marginBottom: '12px' }}>
+                  Tu Compañero solicitó Deshacer
+                </h3>
+                <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '20px', lineHeight: '1.5' }}>
+                  <strong>{gameState.players[gameState.undoRequestedBy].name}</strong> pidió volver atrás su jugada. 
+                  Esperando la decisión del equipo rival...
+                </p>
+                <div className="loading-spinner-small" style={{ margin: '0 auto 10px auto' }}></div>
+              </>
+            ) : (
+              <>
+                <h3 className="modal-title" style={{ fontSize: '1.4rem', color: '#f43f5e', marginBottom: '12px' }}>
+                  ¿Permitir Retroceso de Jugada?
+                </h3>
+                <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '20px', lineHeight: '1.5' }}>
+                  El rival <strong>{gameState.players[gameState.undoRequestedBy].name}</strong> está pidiendo permiso para volver al inicio de su turno (descarte o juego erróneo).
+                </p>
+                <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+                  <button 
+                    className="btn-action btn-green" 
+                    onClick={() => onAction('respond-undo', { accept: true })}
+                    style={{ padding: '8px 24px', fontSize: '0.95rem', flexGrow: 1 }}
+                  >
+                    Permitir ✅
+                  </button>
+                  <button 
+                    className="btn-action btn-red" 
+                    onClick={() => onAction('respond-undo', { accept: false })}
+                    style={{ padding: '8px 24px', fontSize: '0.95rem', flexGrow: 1 }}
+                  >
+                    Rechazar ❌
+                  </button>
+                </div>
+              </>
+            )}
           </div>
         </div>
       )}
