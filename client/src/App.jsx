@@ -64,6 +64,8 @@ export default function App() {
     socket.on('disconnect', () => {
       setConnected(false);
       setGameState(null);
+      setJoined(false);
+      setPlayerIndex(null);
       console.log('Desconectado del servidor de sockets');
     });
 

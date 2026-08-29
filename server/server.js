@@ -961,23 +961,23 @@ io.on('connection', (socket) => {
       io.emit('lobby-update', players.map(p => p.name));
     }
 
-    // Si no quedan jugadores humanos conectados, programar limpieza diferida (gracia de 5 minutos en caso de F5 o desconexión)
+    // Si no quedan jugadores humanos conectados, programar limpieza diferida (gracia de 15 segundos en caso de F5 o desconexión)
     const activeHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot);
     if (activeHumans.length === 0) {
-      console.log('Lobby vacío de humanos. Programando limpieza diferida en 300 segundos (5 minutos).');
+      console.log('Lobby vacío de humanos. Programando limpieza diferida en 15 segundos.');
       if (cleanupTimeout) clearTimeout(cleanupTimeout);
       cleanupTimeout = setTimeout(() => {
         // Volver a verificar si sigue vacío antes de borrar
         const stillNoHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot).length === 0;
         if (stillNoHumans) {
-          console.log('Expiró el tiempo de espera (5 minutos). Limpiando estado de Buraco.');
+          console.log('Expiró el tiempo de espera (15 segundos). Limpiando estado de Buraco.');
           players = [];
           gameState = null;
           globalScores = [0, 0];
           isBotThinking = false;
         }
         cleanupTimeout = null;
-      }, 300000); // 300 segundos (5 minutos) de gracia
+      }, 15000); // 15 segundos de gracia
     }
   });
 
