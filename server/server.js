@@ -928,14 +928,9 @@ io.on('connection', (socket) => {
       return;
     }
 
-    // Si hay rivales humanos, enviar evento de confirmación
+    // Si hay rivales humanos, cambiar estado a esperando confirmación del rival y avisar a todos
     gameState.undoRequestedBy = pIdx;
-    opponentHumans.forEach(opp => {
-      io.to(opp.socketId).emit('undo-requested', { requesterName: players[pIdx].name });
-    });
-
-    // Cambiar estado a esperando respuesta del rival
-    socket.emit('waiting-undo-response');
+    sendStateToAll();
   });
 
   // Responder a la solicitud de deshacer jugada
