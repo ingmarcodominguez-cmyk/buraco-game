@@ -126,7 +126,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
           <tr>
             <th>Concepto</th>
             <th>{is4P ? "Tus Puntos" : "Tú"}</th>
-            <th>{is4P ? "Rivales" : (gameState.players[opponentIndex]?.name || 'Rival')}</th>
+            <th>{is4P ? "Rivales" : (gameState.players?.[opponentIndex]?.name || 'Rival')}</th>
           </tr>
         </thead>
         <tbody>

@@ -1310,7 +1310,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                   Tu Compañero solicitó Deshacer
                 </h3>
                 <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '20px', lineHeight: '1.5' }}>
-                  <strong>{gameState.players[gameState.undoRequestedBy].name}</strong> pidió volver atrás su jugada. 
+                  <strong>{gameState.players?.[gameState.undoRequestedBy]?.name || ''}</strong> pidió volver atrás su jugada. 
                   Esperando la decisión del equipo rival...
                 </p>
                 <div className="loading-spinner-small" style={{ margin: '0 auto 10px auto' }}></div>
@@ -1321,7 +1321,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                   ¿Permitir Retroceso de Jugada?
                 </h3>
                 <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '20px', lineHeight: '1.5' }}>
-                  El rival <strong>{gameState.players[gameState.undoRequestedBy].name}</strong> está pidiendo permiso para volver al inicio de su turno (descarte o juego erróneo).
+                  El rival <strong>{gameState.players?.[gameState.undoRequestedBy]?.name || ''}</strong> está pidiendo permiso para volver al inicio de su turno (descarte o juego erróneo).
                 </p>
                 <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
                   <button 
