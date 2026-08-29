@@ -257,6 +257,27 @@ io.on('connection', (socket) => {
 
   // Unirse al lobby y configurar partida
   socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player }) => {
+    // Si la partida anterior ya finalizó, limpiar el estado para empezar una nueva
+    if (gameState && gameState.status === 'finished') {
+      console.log('La partida anterior ya finalizó. Limpiando estado para iniciar una nueva sala.');
+      players = [];
+      gameState = null;
+      globalScores = [0, 0];
+    }
+
+    // Si no hay otros humanos conectados, y cambian la configuración (2P vs 4P o Bots), reiniciar el lobby
+    const otherActiveHumans = players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
+    if (otherActiveHumans.length === 0) {
+      const is4PVal = is4Player !== undefined ? !!is4Player : is4PlayerSetting;
+      const isBotVal = isAgainstBot !== undefined ? !!isAgainstBot : isAgainstBotSetting;
+      if (is4PlayerSetting !== is4PVal || isAgainstBotSetting !== isBotVal) {
+        console.log('Las configuraciones del lobby cambiaron y no hay otros humanos conectados. Reseteando lobby.');
+        players = [];
+        gameState = null;
+        globalScores = [0, 0];
+      }
+    }
+
     // Si hay una limpieza programada en curso, cancelarla ya que el jugador regresó
     if (cleanupTimeout) {
       console.log(`Jugador regresó (${name}). Cancelando limpieza diferida del juego.`);
