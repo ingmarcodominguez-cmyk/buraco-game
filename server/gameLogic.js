@@ -333,7 +333,8 @@ function initGame(is4Player = false) {
     firstDrawnCardId: null, // Guarda la carta robada en el primer turno
     lastAction: 'Juego iniciado.',
     teamUndoCounts: [0, 0],
-    lastUndoTeam: null
+    lastUndoTeam: null,
+    undoRequestedBy: null
   };
 }
 
