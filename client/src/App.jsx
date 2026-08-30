@@ -173,7 +173,7 @@ export default function App() {
       {/* Encabezado general */}
       <header className="game-header">
         <h1 className="game-title">
-          <span>🃏</span> BURACO MULTIJUGADOR
+          <span>🃏</span> BURACO MULTIJUGADOR <span style={{ fontSize: '0.72rem', color: '#a78bfa', marginLeft: '8px', fontWeight: 'normal', fontStyle: 'italic', opacity: 0.85 }}>powered by Marco Dominguez</span>
         </h1>
         <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button 
