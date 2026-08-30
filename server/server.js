@@ -1834,7 +1834,23 @@ function runBotDiscardPhase(botIdx) {
         gameState.discardPile.push(cardToDiscard);
         gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
         checkMortoIndirect(botIdx);
-  }, 1500);
+      } else {
+        gameState.lastAction = `${botPlayer.name} pasa sin descartar por falta de canastras o decisión estratégica.`;
+      }
+    }
+  } else {
+    botHand.splice(discardIdx, 1);
+    gameState.discardPile.push(cardToDiscard);
+    gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
+    checkMortoIndirect(botIdx);
+  }
+
+  // Pasar turno al siguiente jugador (respetando sentido antihorario)
+  const nextTurn = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
+  isBotThinking = false;
+  startPlayerTurn(nextTurn);
+
+  sendStateToAll();
 }
 
 // HELPER: Conexiones de cartas en la mano para la IA
