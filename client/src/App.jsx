@@ -170,57 +170,59 @@ export default function App() {
         </div>
       )}
 
-      {/* Encabezado general */}
-      <header className="game-header">
-        <h1 className="game-title" style={{ margin: 0 }}>
-          <span>🃏</span> BURACO MULTIJUGADOR 
-          <span style={{ 
-            fontSize: '0.8rem', 
-            color: '#fbbf24', 
-            fontStyle: 'italic', 
-            fontWeight: 'normal', 
-            marginLeft: '8px',
-            letterSpacing: 'normal',
-            WebkitTextFillColor: '#fbbf24',
-            WebkitBackgroundClip: 'unset',
-            background: 'none'
-          }}>
-            powered by Marco Dominguez
-          </span>
-        </h1>
-        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <button 
-            className="btn-header" 
-            onClick={toggleFullscreen}
-            style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-          >
-            {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />} 
-            {isFullscreen ? 'Salir Completa' : 'Pantalla Completa'}
-          </button>
-          
-          {joined && gameState && (
-            <>
-              <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
-                Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
-              </span>
-              <button 
-                className="btn-header" 
-                onClick={() => {
-                  if (window.confirm('¿Quieres salir de la partida actual? El juego se cancelará para todos.')) {
-                    socket.emit('leave-game');
-                    setTimeout(() => {
-                      window.location.reload();
-                    }, 200);
-                  }
-                }}
-                style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
-              >
-                <LogOut size={14} /> Salir
-              </button>
-            </>
-          )}
-        </div>
-      </header>
+      {/* Encabezado general - Solo se muestra dentro del juego */}
+      {gameState && (
+        <header className="game-header">
+          <h1 className="game-title" style={{ margin: 0 }}>
+            <span>🃏</span> BURACO MULTIJUGADOR 
+            <span style={{ 
+              fontSize: '0.8rem', 
+              color: '#fbbf24', 
+              fontStyle: 'italic', 
+              fontWeight: 'normal', 
+              marginLeft: '8px',
+              letterSpacing: 'normal',
+              WebkitTextFillColor: '#fbbf24',
+              WebkitBackgroundClip: 'unset',
+              background: 'none'
+            }}>
+              powered by Marco Dominguez
+            </span>
+          </h1>
+          <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <button 
+              className="btn-header" 
+              onClick={toggleFullscreen}
+              style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+            >
+              {isFullscreen ? <Minimize size={14} /> : <Maximize size={14} />} 
+              {isFullscreen ? 'Salir Completa' : 'Pantalla Completa'}
+            </button>
+            
+            {joined && (
+              <>
+                <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
+                  Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
+                </span>
+                <button 
+                  className="btn-header" 
+                  onClick={() => {
+                    if (window.confirm('¿Quieres salir de la partida actual? El juego se cancelará para todos.')) {
+                      socket.emit('leave-game');
+                      setTimeout(() => {
+                        window.location.reload();
+                      }, 200);
+                    }
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
+                >
+                  <LogOut size={14} /> Salir
+                </button>
+              </>
+            )}
+          </div>
+        </header>
+      )}
 
       {/* Contenido principal: Lobby o Tablero */}
       {!gameState ? (
