@@ -28,56 +28,67 @@ const getTeamOwnerIndex = (idx, is4Player) => {
 export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }) {
   const [prevGameState, setPrevGameState] = useState(null);
   const [animatingDiscard, setAnimatingDiscard] = useState(null);
+  const [newlyAddedCardIds, setNewlyAddedCardIds] = useState(new Set());
+  const highlightTimerRef = React.useRef(null);
 
   useEffect(() => {
-    if (gameState && prevGameState) {
-      const prevDiscard = prevGameState.discardPile || [];
-      const currentDiscard = gameState.discardPile || [];
+    if (gameState) {
+      if (prevGameState) {
+        const prevDiscard = prevGameState.discardPile || [];
+        const currentDiscard = gameState.discardPile || [];
 
-      if (currentDiscard.length > prevDiscard.length) {
-        const discardedCard = currentDiscard[currentDiscard.length - 1];
-        const discarderIdx = prevGameState.turn;
-        const isOpponent = discarderIdx !== playerIndex;
+        if (currentDiscard.length > prevDiscard.length) {
+          const discardedCard = currentDiscard[currentDiscard.length - 1];
+          const discarderIdx = prevGameState.turn;
+          const isOpponent = discarderIdx !== playerIndex;
 
-        setAnimatingDiscard({
-          card: discardedCard,
-          fromOpponent: isOpponent
-        });
+          setAnimatingDiscard({
+            card: discardedCard,
+            fromOpponent: isOpponent
+          });
 
-        setTimeout(() => {
-          setAnimatingDiscard(null);
-        }, 750);
-      }
+          setTimeout(() => {
+            setAnimatingDiscard(null);
+          }, 750);
+        }
 
-      // Detectar cartas nuevas acopladas o bajadas para resaltarlas
-      const prevIds = new Set();
-      prevGameState.players?.forEach(p => {
-        p.melds?.forEach(meld => {
-          meld?.forEach(c => { if (c?.id) prevIds.add(c.id); });
-        });
-      });
-      
-      const newAdded = new Set();
-      gameState.players?.forEach(p => {
-        p.melds?.forEach(meld => {
-          meld?.forEach(c => {
-            if (c?.id && !prevIds.has(c.id)) {
-              newAdded.add(c.id);
-            }
+        // Detectar cartas nuevas acopladas o bajadas para resaltarlas
+        const prevIds = new Set();
+        prevGameState.players?.forEach(p => {
+          p.melds?.forEach(meld => {
+            meld?.forEach(c => { if (c?.id) prevIds.add(c.id); });
           });
         });
-      });
-      
-      if (newAdded.size > 0) {
-        setNewlyAddedCardIds(newAdded);
-        const timer = setTimeout(() => {
-          setNewlyAddedCardIds(new Set());
-        }, 2200);
-        return () => clearTimeout(timer);
+        
+        const newAdded = new Set();
+        gameState.players?.forEach(p => {
+          p.melds?.forEach(meld => {
+            meld?.forEach(c => {
+              if (c?.id && !prevIds.has(c.id)) {
+                newAdded.add(c.id);
+              }
+            });
+          });
+        });
+        
+        if (newAdded.size > 0) {
+          setNewlyAddedCardIds(newAdded);
+          if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+          highlightTimerRef.current = setTimeout(() => {
+            setNewlyAddedCardIds(new Set());
+          }, 2200);
+        }
       }
+      setPrevGameState(gameState);
     }
-    setPrevGameState(gameState);
-  }, [gameState, prevGameState]);
+  }, [gameState, prevGameState, playerIndex]);
+
+  // Limpiar timer al desmontar
+  useEffect(() => {
+    return () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    };
+  }, []);
 
   const [selectedCardIds, setSelectedCardIds] = useState([]);
   const [selectedMeldIndex, setSelectedMeldIndex] = useState(null);
@@ -86,7 +97,6 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [activeTab, setActiveTab] = useState('detalle');
-  const [newlyAddedCardIds, setNewlyAddedCardIds] = useState(new Set());
 
   const renderSidebarSeat = (idx, posStyle) => {
     const player = gameState?.players?.[idx];
@@ -343,7 +353,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
   if (!gameState) return null;
 
-  const isMyTurn = gameState.turn === playerIndex;
+  const isMyTurn = gameState.turn === playerIndex && !animatingDiscard;
   const needToDraw = gameState.turnState === 'draw';
   const canPlay = isMyTurn && !needToDraw;
 
