@@ -76,7 +76,9 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
     }
 
     const nameText = is4P
-      ? (teamIdx === 0 ? "Pareja 1" : "Pareja 2")
+      ? (teamIdx === 0 
+          ? `${gameState.players?.[0]?.name || 'Sur'} & ${gameState.players?.[2]?.name || 'Norte'}` 
+          : `${gameState.players?.[1]?.name || 'Este'} & ${gameState.players?.[3]?.name || 'Oeste'}`)
       : (player?.name || `Jugador ${(typeof teamIdx === 'number' ? teamIdx : 0) + 1}`);
 
     return {

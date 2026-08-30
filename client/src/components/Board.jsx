@@ -48,9 +48,36 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           setAnimatingDiscard(null);
         }, 750);
       }
+
+      // Detectar cartas nuevas acopladas o bajadas para resaltarlas
+      const prevIds = new Set();
+      prevGameState.players?.forEach(p => {
+        p.melds?.forEach(meld => {
+          meld?.forEach(c => { if (c?.id) prevIds.add(c.id); });
+        });
+      });
+      
+      const newAdded = new Set();
+      gameState.players?.forEach(p => {
+        p.melds?.forEach(meld => {
+          meld?.forEach(c => {
+            if (c?.id && !prevIds.has(c.id)) {
+              newAdded.add(c.id);
+            }
+          });
+        });
+      });
+      
+      if (newAdded.size > 0) {
+        setNewlyAddedCardIds(newAdded);
+        const timer = setTimeout(() => {
+          setNewlyAddedCardIds(new Set());
+        }, 2200);
+        return () => clearTimeout(timer);
+      }
     }
     setPrevGameState(gameState);
-  }, [gameState]);
+  }, [gameState, prevGameState]);
 
   const [selectedCardIds, setSelectedCardIds] = useState([]);
   const [selectedMeldIndex, setSelectedMeldIndex] = useState(null);
@@ -59,6 +86,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [activeTab, setActiveTab] = useState('detalle');
+  const [newlyAddedCardIds, setNewlyAddedCardIds] = useState(new Set());
 
   const renderSidebarSeat = (idx, posStyle) => {
     const player = gameState?.players?.[idx];
@@ -452,6 +480,39 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           </div>
         </div>
       )}
+
+      {gameState.status === 'finished-visual' && (
+        <div className="starting-alert-overlay" style={{ zIndex: 1100 }}>
+          <div className="starting-alert-card glass-panel animate-scale-up" style={{ border: '2px solid #10b981', maxWidth: '420px', padding: '24px', textAlign: 'center' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🎴</div>
+            <h2 className="alert-title" style={{ color: '#10b981', fontSize: '1.4rem' }}>
+              ¡Ronda Finalizada!
+            </h2>
+            <div className="alert-divider" style={{ background: '#10b981' }}></div>
+            <p className="alert-message" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#fff', margin: '15px 0' }}>
+              {gameState.players?.[gameState.cutterIndex]?.name || 'Un jugador'} bate la mano
+            </p>
+            <p style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '20px', lineHeight: '1.4' }}>
+              La última carta de descarte se colocó boca abajo. Puedes examinar el estado de los juegos en la mesa antes de continuar.
+            </p>
+            <button 
+              className="btn-primary" 
+              onClick={() => onAction('show-scores-sheet')}
+              style={{ 
+                width: '100%', 
+                padding: '12px', 
+                fontSize: '0.95rem', 
+                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
+                border: 'none', 
+                fontWeight: 'bold',
+                borderRadius: '8px'
+              }}
+            >
+              Ver Puntaje 📊
+            </button>
+          </div>
+        </div>
+      )}
       
       {/* AREA DE JUEGO PRINCIPAL */}
       <div className="main-playarea">
@@ -579,6 +640,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
           <MeldArea 
             melds={opponentMeldsList} 
             isOpponent={true} 
+            newlyAddedCardIds={newlyAddedCardIds}
           />
         </div>
 
@@ -637,7 +699,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                         zIndex: idx
                       }}
                     >
-                      <Card card={card} isHidden={false} />
+                      <Card card={card} isHidden={gameState.status === 'finished-visual' && idx === list.length - 1} />
                     </div>
                   ));
                 })()}
@@ -690,6 +752,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             selectedMeldIndex={selectedMeldIndex}
             isOpponent={false} 
             onDropOnMeld={handleDropOnMeld}
+            newlyAddedCardIds={newlyAddedCardIds}
           />
         </div>
 
@@ -1091,11 +1154,15 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 <h3 style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Puntajes Finales</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '1.2rem', fontWeight: 'bold' }}>
                   <div style={{ color: '#10b981' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>{is4P ? "Pareja 1" : (gameState.players?.[0]?.name || 'Jugador 1')}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>
+                      {is4P ? `${gameState.players?.[0]?.name || 'Sur'} & ${gameState.players?.[2]?.name || 'Norte'}` : (gameState.players?.[0]?.name || 'Jugador 1')}
+                    </div>
                     {gameState.scores?.[0] || 0} pts
                   </div>
                   <div style={{ color: '#3b82f6' }}>
-                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>{is4P ? "Pareja 2" : (gameState.players?.[1]?.name || 'Jugador 2')}</div>
+                    <div style={{ fontSize: '0.8rem', color: '#94a3b8', fontWeight: 'normal' }}>
+                      {is4P ? `${gameState.players?.[1]?.name || 'Este'} & ${gameState.players?.[3]?.name || 'Oeste'}` : (gameState.players?.[1]?.name || 'Jugador 2')}
+                    </div>
                     {gameState.scores?.[1] || 0} pts
                   </div>
                 </div>
@@ -1107,8 +1174,12 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                     <thead>
                       <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
                         <th style={{ padding: '6px 4px', textAlign: 'center' }}>Ronda</th>
-                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>{is4P ? "Pareja 1" : (gameState.players?.[0]?.name || 'J1')}</th>
-                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>{is4P ? "Pareja 2" : (gameState.players?.[1]?.name || 'J2')}</th>
+                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>
+                          {is4P ? `${gameState.players?.[0]?.name || 'Sur'} & ${gameState.players?.[2]?.name || 'Norte'}` : (gameState.players?.[0]?.name || 'J1')}
+                        </th>
+                        <th style={{ padding: '6px 4px', textAlign: 'center' }}>
+                          {is4P ? `${gameState.players?.[1]?.name || 'Este'} & ${gameState.players?.[3]?.name || 'Oeste'}` : (gameState.players?.[1]?.name || 'J2')}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -1141,8 +1212,12 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
 
             <div style={{ display: 'grid', gridTemplateColumns: '1.5fr 1fr 1fr', gap: '10px', alignItems: 'center', textAlign: 'left', marginBottom: '12px' }}>
               <span style={{ fontWeight: 'bold', color: '#94a3b8', fontSize: '0.85rem' }}>Concepto</span>
-              <span style={{ fontWeight: 'bold', color: '#10b981', textAlign: 'center', fontSize: '0.85rem' }}>{is4P ? "Pareja 1" : (gameState.players?.[0]?.name || 'J1')}</span>
-              <span style={{ fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', fontSize: '0.85rem' }}>{is4P ? "Pareja 2" : (gameState.players?.[1]?.name || 'J2')}</span>
+              <span style={{ fontWeight: 'bold', color: '#10b981', textAlign: 'center', fontSize: '0.85rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={is4P ? `${gameState.players?.[0]?.name} & ${gameState.players?.[2]?.name}` : ''}>
+                {is4P ? `${gameState.players?.[0]?.name || 'Sur'} & ${gameState.players?.[2]?.name || 'Norte'}` : (gameState.players?.[0]?.name || 'J1')}
+              </span>
+              <span style={{ fontWeight: 'bold', color: '#3b82f6', textAlign: 'center', fontSize: '0.85rem', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }} title={is4P ? `${gameState.players?.[1]?.name} & ${gameState.players?.[3]?.name}` : ''}>
+                {is4P ? `${gameState.players?.[1]?.name || 'Este'} & ${gameState.players?.[3]?.name || 'Oeste'}` : (gameState.players?.[1]?.name || 'J2')}
+              </span>
               
               {/* Puntos en Mesa */}
               <span style={{ fontSize: '0.9rem' }}>Puntos en Mesa (bajada)</span>

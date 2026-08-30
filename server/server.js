@@ -739,13 +739,14 @@ io.on('connection', (socket) => {
       }
 
       if (hasTakenMorto && canastrasCount >= requiredCanastras) {
-        // Bate y finaliza la ronda!
+        // Bate y finaliza la ronda visualmente!
         hand.splice(cardIdx, 1);
         gameState.discardPile.push(card);
-        gameState.status = 'finished';
+        gameState.status = 'finished-visual';
         gameState.winner = pIdx;
-        gameState.turnState = 'confirm-scores';
-        gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido! Fin de la ronda. Esperando confirmación de puntos.`;
+        gameState.turnState = 'match-over-visual';
+        gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido la mano!`;
+        gameState.cutterIndex = pIdx;
         
         // Calcular puntuaciones
         gameState.roundScores = calculateRoundScores(gameState);
@@ -767,6 +768,15 @@ io.on('connection', (socket) => {
     const nextTurn = gameState.is4Player ? (gameState.turn + 1) % 4 : (gameState.turn === 0 ? 1 : 0);
     startPlayerTurn(nextTurn);
 
+    sendStateToAll();
+  });
+
+  // Mostrar la planilla de puntajes al hacer clic en "Ver Puntaje" tras el corte
+  socket.on('show-scores-sheet', () => {
+    if (!gameState || gameState.status !== 'finished-visual') return;
+    
+    gameState.status = 'finished';
+    gameState.turnState = 'confirm-scores';
     sendStateToAll();
   });
 
@@ -1374,76 +1384,180 @@ function runBotTurn(botIdx) {
       return;
     }
 
-    let botPlayer = gameState.players[botIdx];
-    let botHand = botPlayer.hand;
-    let botMelds = gameState.players[teamIdx].melds;
-
-    const opponentHasMorto = gameState.is4Player ? (gameState.mortosTaken[opponentTeamIdx] !== null) : gameState.mortosTaken[opponentTeamIdx];
-    const botHasMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
-    const deckCount = gameState.drawPile.length;
-
-    let botMeldPoints = 0;
-    botMelds.forEach(meld => {
-      meld.forEach(c => {
-        botMeldPoints += CARD_VALUES[c.rank] || 0;
-      });
-    });
-    const isAlreadyMelded = botMeldPoints >= 30;
-
-    // A. Simular jugadas posibles para ver cuántas cartas puede descargar la IA
-    let tempHand = [...botHand];
-    let tempMelds = botMelds.map(m => [...m]);
-    let cardsPlayedCount = 0;
-
-    // 1. Simular acoples
-    let tempAppended = false;
-    do {
-      tempAppended = false;
-      for (let mIdx = 0; mIdx < tempMelds.length; mIdx++) {
-        const currentMeld = tempMelds[mIdx];
-        const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
-
-        for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
-          const card = tempHand[cIdx];
-          const combined = [...currentMeld, card];
-          const result = validateMeld(combined);
-          if (result.valid) {
-            const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
-            if (isCurrentCleanCanastra && !isNewClean) {
-              continue; // Evitar ensuciar
-            }
-
-            tempMelds[mIdx] = result.cards;
-            tempHand.splice(cIdx, 1);
-            cardsPlayedCount++;
-            tempAppended = true;
-            break;
-          }
-        }
-        if (tempAppended) break;
+    function executeBotMeldStep() {
+      if (!gameState || gameState.status !== 'playing') {
+        isBotThinking = false;
+        return;
       }
-    } while (tempAppended);
 
-    // 2. Simular nuevos juegos
-    const suitsList = ['H', 'D', 'C', 'S'];
-    const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-    suitsList.forEach(suit => {
-      let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-      suitCards.sort((a, b) => (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0));
+      const didSomething = performOneBotMeldAction(botIdx);
+      if (didSomething) {
+        sendStateToAll();
+        setTimeout(executeBotMeldStep, 1200);
+      } else {
+        setTimeout(() => {
+          runBotDiscardPhase(botIdx);
+        }, 1200);
+      }
+    }
+
+    executeBotMeldStep();
+  }, 1500);
+}
+
+// REALIZA EXACTAMENTE UNA ACCIÓN DE ACOPLE O BAJAR UN JUEGO NUEVO
+function performOneBotMeldAction(botIdx) {
+  let botPlayer = gameState.players[botIdx];
+  let botHand = botPlayer.hand;
+  const teamIdx = getTeamOwnerIndex(botIdx, gameState.is4Player);
+  let botMelds = gameState.players[teamIdx].melds;
+
+  const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
+  const opponentHasMorto = gameState.is4Player ? (gameState.mortosTaken[opponentTeamIdx] !== null) : gameState.mortosTaken[opponentTeamIdx];
+  const botHasMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
+  const deckCount = gameState.drawPile.length;
+
+  let botMeldPoints = 0;
+  botMelds.forEach(meld => {
+    meld.forEach(c => {
+      botMeldPoints += CARD_VALUES[c.rank] || 0;
+    });
+  });
+  const isAlreadyMelded = botMeldPoints >= 30;
+
+  // Simular para canTakeMortoThisTurn y canWinThisTurn
+  let tempHand = [...botHand];
+  let tempMelds = botMelds.map(m => [...m]);
+  let cardsPlayedCount = 0;
+  let tempAppended = false;
+  do {
+    tempAppended = false;
+    for (let mIdx = 0; mIdx < tempMelds.length; mIdx++) {
+      const currentMeld = tempMelds[mIdx];
+      const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
+      for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
+        const card = tempHand[cIdx];
+        const combined = [...currentMeld, card];
+        const result = validateMeld(combined);
+        if (result.valid) {
+          const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
+          if (isCurrentCleanCanastra && !isNewClean) continue;
+          tempMelds[mIdx] = result.cards;
+          tempHand.splice(cIdx, 1);
+          cardsPlayedCount++;
+          tempAppended = true;
+          break;
+        }
+      }
+      if (tempAppended) break;
+    }
+  } while (tempAppended);
+
+  const suitsList = ['H', 'D', 'C', 'S'];
+  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+  suitsList.forEach(suit => {
+    let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
+    suitCards.sort((a, b) => (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0));
+    let run = [];
+    for (let i = 0; i < suitCards.length; i++) {
+      const card = suitCards[i];
+      if (run.length === 0) run.push(card);
+      else {
+        const lastVal = rankOrderVals[run[run.length - 1].rank];
+        const curVal = rankOrderVals[card.rank];
+        if (curVal === lastVal + 1) run.push(card);
+        else if (curVal > lastVal + 1) {
+          if (run.length >= 3) {
+            cardsPlayedCount += run.length;
+            run.forEach(rc => {
+              const idx = tempHand.findIndex(c => c.id === rc.id);
+              if (idx !== -1) tempHand.splice(idx, 1);
+            });
+          }
+          run = [card];
+        }
+      }
+    }
+    if (run.length >= 3) {
+      cardsPlayedCount += run.length;
+      run.forEach(rc => {
+        const idx = tempHand.findIndex(c => c.id === rc.id);
+        if (idx !== -1) tempHand.splice(idx, 1);
+      });
+    }
+  });
+
+  const canTakeMortoThisTurn = !botHasMorto && (botHand.length - cardsPlayedCount <= 1);
+  const canastrasCount = botMelds.filter(m => m.length >= 7).length;
+  const requiredCanastras = gameState.requiredCanastras || 1;
+  const canWinThisTurn = botHasMorto && (botHand.length - cardsPlayedCount <= 1) && (canastrasCount >= requiredCanastras);
+
+  const isPartnerMode = gameState.is4Player;
+  const allowPlay = !isAlreadyMelded || isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
+
+  if (!allowPlay) return false;
+
+  // 1. Intentar realizar exactamente UN acople
+  const minCardsHand = !botHasMorto ? 0 : (canWinThisTurn ? 0 : 2);
+  for (let mIdx = 0; mIdx < botMelds.length; mIdx++) {
+    const currentMeld = botMelds[mIdx];
+    const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
+
+    for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
+      const card = botHand[cIdx];
+      if (botHand.length <= minCardsHand) continue;
+
+      const isWildcard = card.rank === '2' || card.rank === 'Joker';
+      const completesCanastra = currentMeld.length === 6;
+      const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn) : true;
+      if (!wildcardsAllowed) continue;
+
+      const combined = [...currentMeld, card];
+      const result = validateMeld(combined);
+      if (result.valid) {
+        const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
+        if (isCurrentCleanCanastra && !isNewClean) continue;
+
+        botMelds[mIdx] = result.cards;
+        botHand.splice(cIdx, 1);
+        gameState.lastAction = `${botPlayer.name} acopló ${card.rank} de ${card.suit} en mesa.`;
+        
+        const tookMortoIndirect = checkMortoIndirect(botIdx);
+        if (!tookMortoIndirect) {
+          checkDirectBatida(botIdx);
+        }
+        return true;
+      }
+    }
+  }
+
+  // 2. Intentar bajar exactamente un juego nuevo
+  const suits = ['H', 'D', 'C', 'S'];
+  const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+  
+  // Si no está bajado, hay que comprobar si los juegos que queremos bajar suman >= 30
+  if (!isAlreadyMelded) {
+    let simHand = [...botHand];
+    let simMeldsSum = 0;
+    
+    // Simular secuencias limpias
+    for (let suit of suits) {
+      let suitCards = simHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
+      suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
       let run = [];
       for (let i = 0; i < suitCards.length; i++) {
         const card = suitCards[i];
         if (run.length === 0) run.push(card);
         else {
-          const lastVal = rankOrderVals[run[run.length - 1].rank];
-          const curVal = rankOrderVals[card.rank];
+          const lastVal = rankOrder[run[run.length - 1].rank];
+          const curVal = rankOrder[card.rank];
           if (curVal === lastVal + 1) run.push(card);
           else if (curVal > lastVal + 1) {
             if (run.length >= 3) {
-              cardsPlayedCount += run.length;
               run.forEach(rc => {
-                const idx = tempHand.findIndex(c => c.id === rc.id);
-                if (idx !== -1) tempHand.splice(idx, 1);
+                simMeldsSum += CARD_VALUES[rc.rank] || 0;
+                const idx = simHand.findIndex(c => c.id === rc.id);
+                if (idx !== -1) simHand.splice(idx, 1);
               });
             }
             run = [card];
@@ -1451,497 +1565,275 @@ function runBotTurn(botIdx) {
         }
       }
       if (run.length >= 3) {
-        cardsPlayedCount += run.length;
         run.forEach(rc => {
-          const idx = tempHand.findIndex(c => c.id === rc.id);
-          if (idx !== -1) tempHand.splice(idx, 1);
+          simMeldsSum += CARD_VALUES[rc.rank] || 0;
+          const idx = simHand.findIndex(c => c.id === rc.id);
+          if (idx !== -1) simHand.splice(idx, 1);
+        });
+      }
+    }
+    
+    // Grupos
+    const simRankGroups = {};
+    simHand.forEach(card => {
+      if (card.rank !== '2' && card.rank !== 'Joker') {
+        if (!simRankGroups[card.rank]) simRankGroups[card.rank] = [];
+        simRankGroups[card.rank].push(card);
+      }
+    });
+    Object.keys(simRankGroups).forEach(rank => {
+      const groupCards = simRankGroups[rank];
+      if (groupCards.length >= 3) {
+        groupCards.forEach(rc => {
+          simMeldsSum += CARD_VALUES[rc.rank] || 0;
         });
       }
     });
 
-    const canTakeMortoThisTurn = !botHasMorto && (botHand.length - cardsPlayedCount <= 1);
-    const canastrasCount = botMelds.filter(m => m.length >= 7).length;
-    const requiredCanastras = gameState.requiredCanastras || 1;
-    const canWinThisTurn = botHasMorto && (botHand.length - cardsPlayedCount <= 1) && (canastrasCount >= requiredCanastras);
+    if (simMeldsSum < 30) {
+      return false; // No podemos bajar nada aún porque no sumamos 30
+    }
+  }
 
-    // ESTRATEGIA DE BURACO:
-    // - Si NO se ha bajado aún, se baja obligatoriamente ASAP.
-    // - En 2v2 (por parejas), la IA siempre baja para que su compañero pueda acoplar!
-    // - En 1v1, la IA prioriza ocultar intenciones y solo baja si el rival tiene muerto, queda poco mazo, o puede tomar muerto/ganar.
-    const isPartnerMode = gameState.is4Player;
-    const allowPlay = !isAlreadyMelded || isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
-
-    if (allowPlay) {
-      // 1. Acoplar a juegos existentes (Greedy pero evitando de ensuciar y gestionando comodines)
-      let appendedAny = false;
-      do {
-        appendedAny = false;
-
-        const teamIdx = getTeamOwnerIndex(botIdx, gameState.is4Player);
-        const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
-        const canastrasCount = botMelds.filter(m => m.length >= 7).length;
-        const requiredCanastras = gameState.requiredCanastras || 1;
-        const canBat = hasTakenMorto && (canastrasCount >= requiredCanastras);
-        const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
-
-        for (let mIdx = 0; mIdx < botMelds.length; mIdx++) {
-          const currentMeld = botMelds[mIdx];
-          const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
-
-          for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
-            const card = botHand[cIdx];
-
-            if (botHand.length <= minCardsHand) continue;
-
-            // Restricción táctica de comodines: no los gastamos en acoples pequeños salvo que nos den el muerto o gane la partida
-            const isWildcard = card.rank === '2' || card.rank === 'Joker';
-            const completesCanastra = currentMeld.length === 6;
-            const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn) : true;
-
-            if (!wildcardsAllowed) continue;
-
-            const combined = [...currentMeld, card];
-            const result = validateMeld(combined);
-            if (result.valid) {
-              const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
-              if (isCurrentCleanCanastra && !isNewClean) {
-                continue; // Evitar ensuciar
-              }
-
-              botMelds[mIdx] = result.cards;
-              botHand.splice(cIdx, 1);
-              appendedAny = true;
-              gameState.lastAction = `${botPlayer.name} acopló cartas a sus juegos en mesa.`;
-              
-              const tookMortoIndirect = checkMortoIndirect(botIdx);
-              if (!tookMortoIndirect) {
-                checkDirectBatida(botIdx);
-              }
-              break;
-            }
+  // Bajar secuencias limpias de 3 o más
+  for (let suit of suits) {
+    let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
+    suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
+    let run = [];
+    for (let i = 0; i < suitCards.length; i++) {
+      const card = suitCards[i];
+      if (run.length === 0) run.push(card);
+      else {
+        const lastVal = rankOrder[run[run.length - 1].rank];
+        const curVal = rankOrder[card.rank];
+        if (curVal === lastVal + 1) run.push(card);
+        else if (curVal > lastVal + 1) {
+          if (run.length >= 3) {
+            if (tryMeldBotRun(run, botIdx, true)) return true;
           }
-          if (appendedAny) break;
+          run = [card];
         }
-      } while (appendedAny);
+      }
+    }
+    if (run.length >= 3) {
+      if (tryMeldBotRun(run, botIdx, true)) return true;
+    }
+  }
 
-      // 2. Bajar nuevos juegos
-      const hasMelded = botMelds.length > 0;
-      if (!hasMelded) {
-        // Simular la búsqueda de todos los posibles juegos válidos para ver si suman >= 30
-        let tempHand = [...botHand];
-        let simMelds = [];
-        let totalSum = 0;
-
-        // A. Secuencias limpias
-        const suits = ['H', 'D', 'C', 'S'];
-        const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-
-        for (let suit of suits) {
-          let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-          suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-
-          let currentRun = [];
-          for (let i = 0; i < suitCards.length; i++) {
-            const card = suitCards[i];
-            if (currentRun.length === 0) {
-              currentRun.push(card);
-            } else {
-              const lastCard = currentRun[currentRun.length - 1];
-              const lastVal = rankOrder[lastCard.rank];
-              const curVal = rankOrder[card.rank];
-              if (curVal === lastVal + 1) {
-                currentRun.push(card);
-              } else if (curVal > lastVal + 1) {
-                if (currentRun.length >= 3) {
-                  simMelds.push([...currentRun]);
-                  currentRun.forEach(rc => {
-                    const idx = tempHand.findIndex(c => c.id === rc.id);
-                    if (idx !== -1) tempHand.splice(idx, 1);
-                  });
-                }
-                currentRun = [card];
-              }
-            }
-          }
-          if (currentRun.length >= 3) {
-            simMelds.push([...currentRun]);
-            currentRun.forEach(rc => {
-              const idx = tempHand.findIndex(c => c.id === rc.id);
-              if (idx !== -1) tempHand.splice(idx, 1);
-            });
-          }
+  // Secuencia usando comodín
+  const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
+  if (freshWildcards.length > 0) {
+    for (let suit of suits) {
+      let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2');
+      suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
+      for (let i = 0; i < suitCards.length - 1; i++) {
+        const c1 = suitCards[i];
+        const c2 = suitCards[i+1];
+        const v1 = rankOrder[c1.rank];
+        const v2 = rankOrder[c2.rank];
+        if (v2 === v1 + 1 || v2 === v1 + 2) {
+          const wc = freshWildcards[0];
+          const candidate = [c1, c2, wc];
+          if (tryMeldBotRun(candidate, botIdx, true)) return true;
         }
+      }
+    }
+  }
 
-        // B. Secuencias usando comodines
-        for (let suit of suits) {
-          let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-          suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
+  // Grupos
+  const rankGroups = {};
+  botHand.forEach(card => {
+    if (card.rank !== '2' && card.rank !== 'Joker') {
+      if (!rankGroups[card.rank]) rankGroups[card.rank] = [];
+      rankGroups[card.rank].push(card);
+    }
+  });
+  for (const rank of Object.keys(rankGroups)) {
+    const groupCards = rankGroups[rank];
+    if (groupCards.length >= 3) {
+      if (tryMeldBotRun(groupCards, botIdx, true)) return true;
+    } else if (groupCards.length === 2 && freshWildcards.length > 0) {
+      const candidate = [...groupCards, freshWildcards[0]];
+      if (tryMeldBotRun(candidate, botIdx, true)) return true;
+    }
+  }
 
-          const freshWildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
-          if (freshWildcards.length > 0) {
-            for (let i = 0; i < suitCards.length - 1; i++) {
-              const c1 = suitCards[i];
-              const c2 = suitCards[i+1];
-              const v1 = rankOrder[c1.rank];
-              const v2 = rankOrder[c2.rank];
-              
-              if (v2 === v1 + 1 || v2 === v1 + 2) {
-                const wc = freshWildcards[0];
-                const candidate = [c1, c2, wc];
-                const res = validateMeld(candidate);
-                if (res.valid) {
-                  simMelds.push(candidate);
-                  candidate.forEach(rc => {
-                    const idx = tempHand.findIndex(c => c.id === rc.id);
-                    if (idx !== -1) tempHand.splice(idx, 1);
-                  });
-                  break;
-                }
-              }
-            }
-          }
+  return false;
+}
+
+// FASE DE DESCARTE DE LA IA
+function runBotDiscardPhase(botIdx) {
+  if (!gameState || gameState.status !== 'playing') {
+    isBotThinking = false;
+    return;
+  }
+
+  let botPlayer = gameState.players[botIdx];
+  let botHand = botPlayer.hand;
+  const teamIdx = getTeamOwnerIndex(botIdx, gameState.is4Player);
+  const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
+  const botMelds = gameState.players[teamIdx].melds;
+  const deckCount = gameState.drawPile.length;
+
+  if (botHand.length === 0) {
+    isBotThinking = false;
+    return;
+  }
+
+  // FASE 3: DESCARTAR UTILIZANDO EL MOTOR DE UTILIDAD HEURÍSTICA
+  let discardIdx = 0;
+  let minScore = Infinity;
+
+  const nextPlayerIdx = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
+  const nextPlayerTeamIdx = getTeamOwnerIndex(nextPlayerIdx, gameState.is4Player);
+  const nextPlayerBlocked = gameState.is4Player && gameState.mortosTaken[nextPlayerTeamIdx] === nextPlayerIdx;
+
+  const opponentPlayer = gameState.players[opponentTeamIdx];
+  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+
+  for (let i = 0; i < botHand.length; i++) {
+    const card = botHand[i];
+    let score = 0;
+
+    // Valor de comodines (muy alto para retenerlos)
+    if (card.rank === 'Joker') score += 1000;
+    else if (card.rank === '2') score += 500;
+    else {
+      // Valor por conexiones y palo
+      const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
+      score += sameSuitCount * 10;
+      score += (CARD_VALUES[card.rank] || 5);
+      
+      const connects = getConnectionsCount(card, botHand);
+      score += connects * 100;
+    }
+
+    // Penalización por duplicados (hace que sea preferible descartarla)
+    const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
+    if (duplicates > 0) {
+      score -= 80;
+    }
+
+    // Filtro de peligro contra oponentes
+    let servesOpponent = false;
+    if (opponentPlayer && opponentPlayer.melds) {
+      for (const meld of opponentPlayer.melds) {
+        if (validateMeld([...meld, card]).valid) {
+          servesOpponent = true;
+          break;
         }
-
-        // C. Grupos de 3
-        const rankGroups = {};
-        tempHand.forEach(card => {
-          if (card.rank !== '2' && card.rank !== 'Joker') {
-            if (!rankGroups[card.rank]) rankGroups[card.rank] = [];
-            rankGroups[card.rank].push(card);
-          }
-        });
-
-        Object.keys(rankGroups).forEach(rank => {
-          const groupCards = rankGroups[rank];
-          if (groupCards.length >= 3) {
-            simMelds.push([...groupCards]);
-            groupCards.forEach(rc => {
-              const idx = tempHand.findIndex(c => c.id === rc.id);
-              if (idx !== -1) tempHand.splice(idx, 1);
-            });
-          }
-        });
-
-        // D. Grupos de 2 + comodín
-        const remainingWildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
-        if (remainingWildcards.length > 0) {
-          const tempGroups = {};
-          tempHand.forEach(card => {
-            if (card.rank !== '2' && card.rank !== 'Joker') {
-              if (!tempGroups[card.rank]) tempGroups[card.rank] = [];
-              tempGroups[card.rank].push(card);
-            }
-          });
-
-          for (let rank of Object.keys(tempGroups)) {
-            const groupCards = tempGroups[rank];
-            if (groupCards.length === 2 && remainingWildcards.length > 0) {
-              const wc = remainingWildcards.shift();
-              const candidate = [...groupCards, wc];
-              simMelds.push(candidate);
-              candidate.forEach(rc => {
-                const idx = tempHand.findIndex(c => c.id === rc.id);
-                if (idx !== -1) tempHand.splice(idx, 1);
-              });
-            }
-          }
-        }
-
-        // Calcular valor de todas las simMelds encontradas
-        simMelds.forEach(meld => {
-          meld.forEach(c => {
-            totalSum += CARD_VALUES[c.rank] || 0;
-          });
-        });
-
-        // Bajar inicial si alcanza 30 pts
-        if (totalSum >= 30) {
-          simMelds.forEach(meld => {
-            tryMeldBotRun(meld, botIdx, true);
-          });
-        }
-      } else {
-        // Bajar nuevos juegos inmediatamente
-        const suits = ['H', 'D', 'C', 'S'];
-        suits.forEach(suit => {
-          let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2');
-          const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-          suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-
-          let currentRun = [];
-          for (let i = 0; i < suitCards.length; i++) {
-            const card = suitCards[i];
-            if (currentRun.length === 0) {
-              currentRun.push(card);
-            } else {
-              const lastCard = currentRun[currentRun.length - 1];
-              const lastVal = rankOrder[lastCard.rank];
-              const curVal = rankOrder[card.rank];
-              if (curVal === lastVal + 1) {
-                currentRun.push(card);
-              } else if (curVal > lastVal + 1) {
-                if (currentRun.length >= 3) {
-                  tryMeldBotRun(currentRun, botIdx, true);
-                }
-                currentRun = [card];
-              }
-            }
-          }
-          if (currentRun.length >= 3) {
-            tryMeldBotRun(currentRun, botIdx, true);
-          }
-
-          // Secuencia de 3 usando comodín
-          botPlayer = gameState.players[botIdx];
-          botHand = botPlayer.hand;
-          suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2');
-          suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-
-          const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
-          if (freshWildcards.length > 0) {
-            for (let i = 0; i < suitCards.length - 1; i++) {
-              const c1 = suitCards[i];
-              const c2 = suitCards[i+1];
-              const v1 = rankOrder[c1.rank];
-              const v2 = rankOrder[c2.rank];
-              
-              if (v2 === v1 + 1 || v2 === v1 + 2) {
-                const wc = freshWildcards[0];
-                const candidate = [c1, c2, wc];
-                const res = validateMeld(candidate);
-                if (res.valid) {
-                  tryMeldBotRun(candidate, botIdx, true);
-                  break;
-                }
-              }
-            }
-          }
-        });
-
-        // Grupos
-        botPlayer = gameState.players[botIdx];
-        botHand = botPlayer.hand;
-        const rankGroups = {};
-        botHand.forEach(card => {
-          if (card.rank !== '2' && card.rank !== 'Joker') {
-            if (!rankGroups[card.rank]) rankGroups[card.rank] = [];
-            rankGroups[card.rank].push(card);
-          }
-        });
-
-        Object.keys(rankGroups).forEach(rank => {
-          const groupCards = rankGroups[rank];
-          if (groupCards.length >= 3) {
-            tryMeldBotRun(groupCards, botIdx, true);
-          } else if (groupCards.length === 2) {
-            botPlayer = gameState.players[botIdx];
-            botHand = botPlayer.hand;
-            const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
-            if (freshWildcards.length > 0) {
-              const candidate = [...groupCards, freshWildcards[0]];
-              tryMeldBotRun(candidate, botIdx, true);
-            }
-          }
-        });
       }
     }
 
-    checkMortoDirect(botIdx);
-    sendStateToAll();
-
-    // Esperar 1.5s antes de Descartar
-    setTimeout(() => {
-      if (!gameState || gameState.status !== 'playing') {
-        isBotThinking = false;
-        return;
-      }
-
-      botPlayer = gameState.players[botIdx];
-      botHand = botPlayer.hand;
-
-      if (botHand.length === 0) {
-        isBotThinking = false;
-        return;
-      }
-
-      // FASE 3: DESCARTAR UTILIZANDO EL MOTOR DE UTILIDAD HEURÍSTICA
-      let discardIdx = 0;
-      let minScore = Infinity;
-
-      const nextPlayerIdx = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
-      const nextPlayerTeamIdx = getTeamOwnerIndex(nextPlayerIdx, gameState.is4Player);
-      const nextPlayerBlocked = gameState.is4Player && gameState.mortosTaken[nextPlayerTeamIdx] === nextPlayerIdx;
-
-      for (let i = 0; i < botHand.length; i++) {
-        const card = botHand[i];
-        let score = 0;
-
-        // Valor de comodines (muy alto para retenerlos)
-        if (card.rank === 'Joker') score += 1000;
-        else if (card.rank === '2') score += 500;
-        else {
-          // Valor por conexiones y palo
-          const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
-          score += sameSuitCount * 10;
-          score += (CARD_VALUES[card.rank] || 5);
-          
-          const connects = getConnectionsCount(card, botHand);
-          score += connects * 100;
-        }
-
-        // Penalización por duplicados (hace que sea preferible descartarla)
-        const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
-        if (duplicates > 0) {
-          score -= 80;
-        }
-
-        // Filtro de peligro contra oponentes
-        const opponentPlayer = gameState.players[opponentTeamIdx];
-        let servesOpponent = false;
-        if (opponentPlayer && opponentPlayer.melds) {
-          for (const meld of opponentPlayer.melds) {
-            if (validateMeld([...meld, card]).valid) {
-              servesOpponent = true;
+    let adjacentToOpponentMeld = false;
+    if (opponentPlayer && opponentPlayer.melds) {
+      for (const meld of opponentPlayer.melds) {
+        if (meld.length > 0 && meld[0].suit === card.suit) {
+          const rankVals = meld.map(c => rankOrderVals[c.rank]).filter(Boolean);
+          if (rankVals.length > 0) {
+            const minVal = Math.min(...rankVals);
+            const maxVal = Math.max(...rankVals);
+            const cardVal = rankOrderVals[card.rank];
+            if (cardVal === minVal - 1 || cardVal === maxVal + 1) {
+              adjacentToOpponentMeld = true;
               break;
             }
           }
         }
+      }
+    }
 
-        let adjacentToOpponentMeld = false;
-        if (opponentPlayer && opponentPlayer.melds) {
-          for (const meld of opponentPlayer.melds) {
-            if (meld.length > 0 && meld[0].suit === card.suit) {
-              const rankVals = meld.map(c => rankOrderVals[c.rank]).filter(Boolean);
-              if (rankVals.length > 0) {
-                const minVal = Math.min(...rankVals);
-                const maxVal = Math.max(...rankVals);
-                const cardVal = rankOrderVals[card.rank];
-                if (cardVal === minVal - 1 || cardVal === maxVal + 1) {
-                  adjacentToOpponentMeld = true;
-                  break;
-                }
-              }
-            }
-          }
-        }
+    let dangerPenalty = 0;
+    if (servesOpponent) dangerPenalty += 500;
+    else if (adjacentToOpponentMeld) dangerPenalty += 250;
 
-        let dangerPenalty = 0;
-        if (servesOpponent) dangerPenalty += 500;
-        else if (adjacentToOpponentMeld) dangerPenalty += 250;
+    // Defensa: Bloqueo de salida si al rival le quedan pocas cartas
+    const opponentHandSize = opponentPlayer?.hand?.length || 0;
+    if (opponentHandSize <= 3 && servesOpponent) {
+      dangerPenalty += 500;
+    }
 
-        // Defensa: Bloqueo de salida si al rival le quedan pocas cartas
-        const opponentHandSize = opponentPlayer?.hand?.length || 0;
-        if (opponentHandSize <= 3 && servesOpponent) {
-          dangerPenalty += 500;
-        }
-
-        // APLICACIÓN DE LA REGLA DE BLOQUEO DEL MUERTO:
-        if (nextPlayerBlocked) {
-          // El rival está bloqueado, el riesgo es nulo
-          dangerPenalty = 0;
-
-          // ¿Sirve para el compañero?
-          const partnerIdx = (botIdx + 2) % 4;
-          const partnerMelds = gameState.players[teamIdx]?.melds || [];
-          let servesPartner = false;
-          for (const meld of partnerMelds) {
-            if (validateMeld([...meld, card]).valid) {
-              servesPartner = true;
-              break;
-            }
-          }
-          if (servesPartner) {
-            score -= 600; // Descartar esta carta con prioridad máxima
-          }
-        }
-
-        score += dangerPenalty;
-
-        if (score < minScore) {
-          minScore = score;
-          discardIdx = i;
+    // APLICACIÓN DE LA REGLA DE BLOQUEO DEL MUERTO:
+    if (nextPlayerBlocked) {
+      dangerPenalty = 0;
+      const partnerIdx = (botIdx + 2) % 4;
+      const partnerMelds = gameState.players[teamIdx]?.melds || [];
+      let servesPartner = false;
+      for (const meld of partnerMelds) {
+        if (validateMeld([...meld, card]).valid) {
+          servesPartner = true;
+          break;
         }
       }
-
-      const cardToDiscard = botHand[discardIdx];
-
-      // AUDITORÍA PRE-CORTE (CIERRE)
-      let shouldWin = true;
-      if (botHand.length === 1) {
-        const canastrasCount = botMelds.filter(m => m.length >= 7).length;
-        const requiredCanastras = gameState.requiredCanastras || 1;
-        const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
-
-        if (hasTakenMorto && canastrasCount >= requiredCanastras) {
-          // Estimar si el cierre es favorable
-          const myTeamIdx = teamIdx;
-          const oppTeamIdx = opponentTeamIdx;
-          
-          let myMeldPoints = 0;
-          botMelds.forEach(m => m.forEach(c => myMeldPoints += CARD_VALUES[c.rank] || 0));
-          const myCleanCount = botMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
-          const myDirtyCount = botMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
-
-          let oppMeldPoints = 0;
-          const oppMelds = gameState.players[oppTeamIdx]?.melds || [];
-          oppMelds.forEach(m => m.forEach(c => oppMeldPoints += CARD_VALUES[c.rank] || 0));
-          const oppCleanCount = oppMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
-          const oppDirtyCount = oppMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
-
-          const myEstTotal = myMeldPoints + myCleanCount * 200 + myDirtyCount * 100 + 100;
-          const oppEstTotal = oppMeldPoints + oppCleanCount * 200 + oppDirtyCount * 100;
-          
-          const netDiff = myEstTotal - oppEstTotal;
-
-          if (netDiff < 0 && deckCount > 8) {
-            shouldWin = false; // No cerrar todavía, esperar a tener más puntos
-          }
-        }
+      if (servesPartner) {
+        score -= 600;
       }
+    }
 
-      if (botHand.length === 1 && shouldWin) {
-        const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
-        const canastrasCount = botMelds.filter(m => m.length >= 7).length;
-        const requiredCanastras = gameState.requiredCanastras || 1;
+    score += dangerPenalty;
 
-        if (hasTakenMorto && canastrasCount >= requiredCanastras) {
-          botHand.splice(discardIdx, 1);
-          gameState.discardPile.push(cardToDiscard);
-          gameState.status = 'finished';
-          gameState.winner = botIdx;
-          gameState.turnState = 'confirm-scores';
-          gameState.lastAction = `¡${botPlayer.name} ha batido! Fin de la ronda. Esperando confirmación de puntos.`;
-          
-          gameState.roundScores = calculateRoundScores(gameState);
-          
-          isBotThinking = false;
-          sendStateToAll();
-          return;
-        } else {
-          if (!hasTakenMorto) {
-            botHand.splice(discardIdx, 1);
-            gameState.discardPile.push(cardToDiscard);
-            gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
-            checkMortoIndirect(botIdx);
-          } else {
-            gameState.lastAction = `${botPlayer.name} pasa sin descartar por falta de canastras o decisión estratégica.`;
-          }
-        }
-      } else {
+    if (score < minScore) {
+      minScore = score;
+      discardIdx = i;
+    }
+  }
+
+  const cardToDiscard = botHand[discardIdx];
+
+  // AUDITORÍA PRE-CORTE (CIERRE)
+  let shouldWin = true;
+  if (botHand.length === 1) {
+    const canastrasCount = botMelds.filter(m => m.length >= 7).length;
+    const requiredCanastras = gameState.requiredCanastras || 1;
+    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
+
+    if (hasTakenMorto && canastrasCount >= requiredCanastras) {
+      let myMeldPoints = 0;
+      botMelds.forEach(m => m.forEach(c => myMeldPoints += CARD_VALUES[c.rank] || 0));
+      const myCleanCount = botMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+      const myDirtyCount = botMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+
+      let oppMeldPoints = 0;
+      const oppMelds = gameState.players[opponentTeamIdx]?.melds || [];
+      oppMelds.forEach(m => m.forEach(c => oppMeldPoints += CARD_VALUES[c.rank] || 0));
+      const oppCleanCount = oppMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+      const oppDirtyCount = oppMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+
+      const myEstTotal = myMeldPoints + myCleanCount * 200 + myDirtyCount * 100 + 100;
+      const oppEstTotal = oppMeldPoints + oppCleanCount * 200 + oppDirtyCount * 100;
+      const netDiff = myEstTotal - oppEstTotal;
+
+      if (netDiff < 0 && deckCount > 8) {
+        shouldWin = false;
+      }
+    }
+  }
+
+  if (botHand.length === 1 && shouldWin) {
+    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
+    const canastrasCount = botMelds.filter(m => m.length >= 7).length;
+    const requiredCanastras = gameState.requiredCanastras || 1;
+
+    if (hasTakenMorto && canastrasCount >= requiredCanastras) {
+      botHand.splice(discardIdx, 1);
+      gameState.discardPile.push(cardToDiscard);
+      gameState.status = 'finished-visual';
+      gameState.winner = botIdx;
+      gameState.turnState = 'match-over-visual';
+      gameState.lastAction = `¡${botPlayer.name} ha batido la mano!`;
+      gameState.cutterIndex = botIdx;
+      
+      gameState.roundScores = calculateRoundScores(gameState);
+      
+      isBotThinking = false;
+      sendStateToAll();
+      return;
+    } else {
+      if (!hasTakenMorto) {
         botHand.splice(discardIdx, 1);
         gameState.discardPile.push(cardToDiscard);
         gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
         checkMortoIndirect(botIdx);
-      }
-
-      // Pasar turno al siguiente jugador (respetando sentido antihorario)
-      const nextTurn = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
-      isBotThinking = false;
-      startPlayerTurn(nextTurn);
-
-      sendStateToAll();
-    }, 1500);
-
   }, 1500);
 }
 

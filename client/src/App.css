@@ -1079,3 +1079,26 @@ body {
   0%, 100% { border-color: rgba(251, 191, 36, 0.3); }
   50% { border-color: rgba(251, 191, 36, 0.9); }
 }
+
+@keyframes cardFlash {
+  0% {
+    box-shadow: 0 0 0 0px rgba(16, 185, 129, 0.8), 0 4px 10px rgba(0,0,0,0.3);
+    border-color: #10b981;
+    transform: scale(1.08);
+  }
+  50% {
+    box-shadow: 0 0 20px 6px rgba(16, 185, 129, 1), 0 4px 10px rgba(0,0,0,0.3);
+    border-color: #34d399;
+    transform: scale(1.12);
+  }
+  100% {
+    box-shadow: 0 0 0 0px rgba(16, 185, 129, 0), 0 4px 10px rgba(0,0,0,0.3);
+    border-color: rgba(255,255,255,0.15);
+    transform: scale(1);
+  }
+}
+
+.card-flash-highlight {
+  animation: cardFlash 1.8s cubic-bezier(0.25, 1, 0.5, 1) forwards;
+  z-index: 100 !important;
+}

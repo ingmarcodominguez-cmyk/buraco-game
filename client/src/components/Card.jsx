@@ -34,7 +34,7 @@ const CARD_POINTS = {
   'Joker': 50
 };
 
-export default function Card({ card, onClick, selected, isHidden }) {
+export default function Card({ card, onClick, selected, isHidden, isHighlighted }) {
   if (isHidden || card.id === 'hidden') {
     return (
       <div className="playing-card card-back">
@@ -56,7 +56,7 @@ export default function Card({ card, onClick, selected, isHidden }) {
 
   return (
     <div 
-      className={`playing-card ${colorClass} ${selected ? 'selected' : ''}`}
+      className={`playing-card ${colorClass} ${selected ? 'selected' : ''} ${isHighlighted ? 'card-flash-highlight' : ''}`}
       onClick={onClick}
     >
       <div className="card-top-left">

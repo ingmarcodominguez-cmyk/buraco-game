@@ -2,7 +2,7 @@
 import React from 'react';
 import Card from './Card';
 
-export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOpponent, onDropOnMeld }) {
+export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOpponent, onDropOnMeld, newlyAddedCardIds }) {
   const isCompact = melds.length >= 3;
   const [dragOverIndex, setDragOverIndex] = React.useState(null);
 
@@ -65,6 +65,7 @@ export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOppo
                     key={card.id || cIdx} 
                     card={card} 
                     isHidden={false} 
+                    isHighlighted={newlyAddedCardIds?.has(card.id)}
                   />
                 ))}
               </div>
