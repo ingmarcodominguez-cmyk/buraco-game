@@ -492,8 +492,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
       )}
 
       {gameState.status === 'finished-visual' && (
-        <div className="starting-alert-overlay" style={{ zIndex: 1100 }}>
-          <div className="starting-alert-card glass-panel animate-scale-up" style={{ border: '2px solid #10b981', maxWidth: '420px', padding: '24px', textAlign: 'center' }}>
+        <div className="starting-alert-overlay" style={{ zIndex: 1100, pointerEvents: 'auto' }}>
+          <div className="starting-alert-card glass-panel" style={{ animation: 'alertScaleUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards', border: '2px solid #10b981', maxWidth: '420px', padding: '24px', textAlign: 'center' }}>
             <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🎴</div>
             <h2 className="alert-title" style={{ color: '#10b981', fontSize: '1.4rem' }}>
               ¡Ronda Finalizada!
