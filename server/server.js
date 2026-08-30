@@ -980,6 +980,28 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Abandonar la partida explícitamente (abortar juego y limpiar lobby)
+  socket.on('leave-game', () => {
+    console.log(`Un jugador solicitó abandonar la partida: ${socket.id}`);
+    
+    // Si la partida está activa, notificar a los demás y resetear todo
+    if (gameState) {
+      io.emit('game-aborted', 'La partida fue cancelada porque un jugador la abandonó.');
+    }
+    
+    // Resetear lobby
+    players = [];
+    gameState = null;
+    globalScores = [0, 0];
+    isBotThinking = false;
+    if (cleanupTimeout) {
+      clearTimeout(cleanupTimeout);
+      cleanupTimeout = null;
+    }
+    
+    io.emit('lobby-update', []);
+  });
+
   // Desconexión
   socket.on('disconnect', () => {
     console.log(`Cliente desconectado: ${socket.id}`);

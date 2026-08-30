@@ -93,6 +93,12 @@ export default function App() {
       setErrorMessage(msg);
     });
 
+    // Escuchar si la partida fue abortada por otro jugador
+    socket.on('game-aborted', (msg) => {
+      alert(msg);
+      window.location.reload();
+    });
+
     // Manejar re-conexión automática si ya teníamos un nombre ingresado
     socket.on('reconnect', () => {
       if (playerName) {
@@ -107,6 +113,7 @@ export default function App() {
       socket.off('lobby-update');
       socket.off('game-state');
       socket.off('error-message');
+      socket.off('game-aborted');
     };
   }, [playerName]);
 
@@ -186,8 +193,11 @@ export default function App() {
               <button 
                 className="btn-header" 
                 onClick={() => {
-                  if (window.confirm('¿Quieres salir de la partida actual?')) {
-                    window.location.reload();
+                  if (window.confirm('¿Quieres salir de la partida actual? El juego se cancelará para todos.')) {
+                    socket.emit('leave-game');
+                    setTimeout(() => {
+                      window.location.reload();
+                    }, 200);
                   }
                 }}
                 style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
