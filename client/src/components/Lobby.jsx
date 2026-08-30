@@ -21,6 +21,9 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
     <div className="lobby-container">
       <div className="lobby-card glass-panel">
         <h1 className="lobby-logo">BURACO</h1>
+        <div style={{ fontSize: '0.7rem', letterSpacing: '3px', color: '#a78bfa', marginTop: '-12px', marginBottom: '20px', fontWeight: '800', textTransform: 'uppercase', opacity: 0.8 }}>
+          powered by MARCO DOMINGUEZ
+        </div>
         <p className="lobby-subtitle">Juego de cartas multijugador para 2 o 4 notebooks</p>
 
         {!joined ? (
