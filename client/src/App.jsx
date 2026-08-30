@@ -176,7 +176,7 @@ export default function App() {
           <h1 className="game-title" style={{ margin: 0 }}>
             <span>🃏</span> BURACO MULTIJUGADOR
           </h1>
-          <span style={{ fontSize: '0.75rem', color: '#a78bfa', fontStyle: 'italic', fontWeight: '500', opacity: 0.9 }}>
+          <span style={{ fontSize: '0.85rem', color: '#fbbf24', fontStyle: 'italic', fontWeight: '500', marginLeft: '6px' }}>
             powered by Marco Dominguez
           </span>
         </div>
