@@ -265,9 +265,9 @@ body {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 10px 16px;
+  padding: 6px 12px;
   overflow-y: auto;
-  gap: 10px;
+  gap: 4px;
 }
 
 .sidebar {
@@ -284,17 +284,17 @@ body {
 /* Player/Opponent Zones */
 .player-zone {
   width: 100%;
-  padding: 8px 12px;
+  padding: 4px 10px;
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .zone-header {
-  font-size: 0.9rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: #94a3b8;
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -403,8 +403,8 @@ body {
   display: flex;
   justify-content: flex-start;
   align-items: center;
-  gap: 24px;
-  margin: 8px 0;
+  gap: 12px;
+  margin: 2px 0;
   padding-left: 16px;
 }
 
@@ -412,7 +412,7 @@ body {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
 }
 
 .pile-title {

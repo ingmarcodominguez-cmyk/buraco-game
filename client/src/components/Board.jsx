@@ -58,6 +58,68 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   const [logs, setLogs] = useState([]);
   const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
+  const [activeTab, setActiveTab] = useState('detalle');
+
+  const renderSidebarSeat = (idx, posStyle) => {
+    const player = gameState?.players?.[idx];
+    if (!player) return null;
+
+    const isCurrentTurn = gameState.turn === idx;
+    const teamIdx = getTeamOwnerIndex(idx, is4P);
+    const tookMorto = is4P ? gameState.mortosTaken?.[teamIdx] === idx : false;
+    
+    const cardinalNames = ['SUR', 'ESTE', 'NORTE', 'OESTE'];
+    const isMe = idx === safePlayerIndex;
+    const label = cardinalNames[idx] + (isMe ? ' (Tú)' : '');
+
+    return (
+      <div style={{
+        position: 'absolute',
+        width: '78px',
+        background: isCurrentTurn ? 'rgba(251, 191, 36, 0.95)' : 'rgba(15, 23, 42, 0.92)',
+        border: isCurrentTurn ? '1.5px solid #fbbf24' : '1px solid rgba(255,255,255,0.12)',
+        borderRadius: '6px',
+        padding: '4px',
+        boxShadow: isCurrentTurn ? '0 0 8px rgba(251, 191, 36, 0.5)' : '0 2px 4px rgba(0,0,0,0.4)',
+        color: isCurrentTurn ? '#000' : '#fff',
+        fontSize: '0.62rem',
+        textAlign: 'center',
+        zIndex: 10,
+        lineHeight: '1.2',
+        ...posStyle
+      }}>
+        <div style={{
+          fontWeight: '800',
+          color: isCurrentTurn ? '#000' : '#c084fc',
+          fontSize: '0.52rem',
+          letterSpacing: '0.5px'
+        }}>
+          {label}
+        </div>
+        <div style={{
+          fontWeight: '700',
+          margin: '1px 0',
+          textOverflow: 'ellipsis',
+          overflow: 'hidden',
+          whiteSpace: 'nowrap'
+        }}>
+          {player.name}
+        </div>
+        <div style={{ fontSize: '0.58rem', fontWeight: 'bold' }}>
+          🎴 {player.hand?.length || 0}
+        </div>
+        <div style={{
+          fontSize: '0.5rem',
+          fontWeight: '600',
+          color: tookMorto ? (isCurrentTurn ? '#065f46' : '#34d399') : (isCurrentTurn ? '#4b5563' : '#94a3b8'),
+          marginTop: '1px'
+        }}>
+          {tookMorto ? 'Con Muerto' : 'Sin Muerto'}
+        </div>
+      </div>
+    );
+  };
+
   const [scoreForm, setScoreForm] = useState({
     p0Mesa: 0, p0Limpias: 0, p0Sucias: 0, p0Mano: 0, p0Cierre: false, p0SinMuerto: false,
     p1Mesa: 0, p1Limpias: 0, p1Sucias: 0, p1Mano: 0, p1Cierre: false, p1SinMuerto: false
@@ -394,121 +456,23 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
       {/* AREA DE JUEGO PRINCIPAL */}
       <div className="main-playarea">
         
-        {/* En modo 4 jugadores, mostramos los otros 3 jugadores distribuidos en sus asientos */}
+        {/* En modo 4 jugadores, mostramos una pequeña barra de estado arriba (opcional y compacta) */}
         {is4P && (
-          <div className="multiplayer-seats-container" style={{
+          <div style={{
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            padding: '10px 16px',
+            justifyContent: 'space-around',
+            padding: '6px 12px',
             background: 'rgba(15, 23, 42, 0.4)',
-            borderRadius: '12px',
-            border: '1px solid rgba(255, 255, 255, 0.08)',
-            marginBottom: '12px',
-            gap: '12px',
-            backdropFilter: 'blur(10px)'
+            borderRadius: '8px',
+            border: '1px solid rgba(255, 255, 255, 0.05)',
+            marginBottom: '6px',
+            fontSize: '0.72rem',
+            color: '#cbd5e1',
+            gap: '8px'
           }}>
-            {/* Jugador Izquierda: Rival Líder */}
-            <div className={`seat-card ${gameState.turn === leftOppIndex ? 'active-seat' : ''}`} style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '8px',
-              borderRadius: '8px',
-              background: 'rgba(30, 41, 59, 0.3)',
-              border: gameState.turn === leftOppIndex ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.05)',
-              textAlign: 'center',
-              boxShadow: gameState.turn === leftOppIndex ? '0 0 10px rgba(239, 68, 68, 0.25)' : 'none'
-            }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players?.[leftOppIndex]?.name || ''}</span>
-              <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rival Izq</span>
-              
-              <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
-                {Array.from({ length: Math.min(5, gameState.players?.[leftOppIndex]?.hand?.length || 0) }).map((_, i) => (
-                  <div key={i} className="mini-card-back" />
-                ))}
-                {(gameState.players?.[leftOppIndex]?.hand?.length || 0) > 5 && (
-                  <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
-                    +{gameState.players?.[leftOppIndex].hand.length - 5}
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
-                {gameState.players?.[leftOppIndex]?.hand?.length || 0} cartas
-              </span>
-              <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[oppTeamIdx] === leftOppIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
-                {gameState.mortosTaken[oppTeamIdx] === leftOppIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
-              </span>
-            </div>
-
-            {/* Jugador Arriba: Compañero */}
-            <div className={`seat-card ${gameState.turn === partnerIndex ? 'active-seat' : ''}`} style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '8px',
-              borderRadius: '8px',
-              background: 'rgba(30, 41, 59, 0.3)',
-              border: gameState.turn === partnerIndex ? '1px solid #fbbf24' : '1px solid rgba(255,255,255,0.05)',
-              textAlign: 'center',
-              boxShadow: gameState.turn === partnerIndex ? '0 0 10px rgba(251, 191, 36, 0.25)' : 'none'
-            }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fde047' }}>{gameState.players?.[partnerIndex]?.name || ''}</span>
-              <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Compañero</span>
-              
-              <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
-                {Array.from({ length: Math.min(5, gameState.players?.[partnerIndex]?.hand?.length || 0) }).map((_, i) => (
-                  <div key={i} className="mini-card-back" style={{ background: 'linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%)' }} />
-                ))}
-                {(gameState.players?.[partnerIndex]?.hand?.length || 0) > 5 && (
-                  <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
-                    +{gameState.players?.[partnerIndex].hand.length - 5}
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
-                {gameState.players?.[partnerIndex]?.hand?.length || 0} cartas
-              </span>
-              <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[myTeamIdx] === partnerIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
-                {gameState.mortosTaken[myTeamIdx] === partnerIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
-              </span>
-            </div>
-
-            {/* Jugador Derecha: Rival Teammate */}
-            <div className={`seat-card ${gameState.turn === rightOppIndex ? 'active-seat' : ''}`} style={{
-              flex: 1,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              padding: '8px',
-              borderRadius: '8px',
-              background: 'rgba(30, 41, 59, 0.3)',
-              border: gameState.turn === rightOppIndex ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.05)',
-              textAlign: 'center',
-              boxShadow: gameState.turn === rightOppIndex ? '0 0 10px rgba(239, 68, 68, 0.25)' : 'none'
-            }}>
-              <span style={{ fontSize: '0.82rem', fontWeight: 'bold', color: '#fca5a5' }}>{gameState.players?.[rightOppIndex]?.name || ''}</span>
-              <span style={{ fontSize: '0.65rem', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Rival Der</span>
-              
-              <div style={{ display: 'flex', gap: '2px', marginTop: '6px', justifyContent: 'center' }}>
-                {Array.from({ length: Math.min(5, gameState.players?.[rightOppIndex]?.hand?.length || 0) }).map((_, i) => (
-                  <div key={i} className="mini-card-back" />
-                ))}
-                {(gameState.players?.[rightOppIndex]?.hand?.length || 0) > 5 && (
-                  <span style={{ fontSize: '0.7rem', color: '#cbd5e1', alignSelf: 'center', marginLeft: '3px' }}>
-                    +{gameState.players?.[rightOppIndex].hand.length - 5}
-                  </span>
-                )}
-              </div>
-              <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginTop: '4px', fontWeight: 600 }}>
-                {gameState.players?.[rightOppIndex]?.hand?.length || 0} cartas
-              </span>
-              <span style={{ fontSize: '0.65rem', color: gameState.mortosTaken[oppTeamIdx] === rightOppIndex ? '#10b981' : '#64748b', fontWeight: 500, marginTop: '2px' }}>
-                {gameState.mortosTaken[oppTeamIdx] === rightOppIndex ? 'Tomó Muerto 👤' : 'Sin Muerto'}
-              </span>
-            </div>
+            <span>🟢 <b>{gameState.players?.[2]?.name}</b> (Norte): {gameState.players?.[2]?.hand?.length || 0} c.</span>
+            <span>🔴 <b>{gameState.players?.[1]?.name}</b> (Este): {gameState.players?.[1]?.hand?.length || 0} c.</span>
+            <span>🔴 <b>{gameState.players?.[3]?.name}</b> (Oeste): {gameState.players?.[3]?.hand?.length || 0} c.</span>
           </div>
         )}
 
@@ -941,74 +905,172 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
       {/* PANEL LATERAL (INFORMACION, LOGS Y PUNTAJES) */}
       <div className="sidebar">
         
-        {/* Info general */}
-        <div className="sidebar-section" style={{ background: 'rgba(0,0,0,0.15)' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-            <span style={{ fontWeight: 800, color: '#10b981' }}>SALA ACTIVA</span>
-            <div style={{ display: 'flex', gap: '6px' }}>
-              <button className="btn-header" onClick={handleRestart} title="Reiniciar ronda actual">
-                <RefreshCw size={14} />
-              </button>
-              <button className="btn-header" onClick={handleResetAll} title="Resetear puntos globales">
-                Reset General
-              </button>
-            </div>
-          </div>
-          <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
-            Jugadores: <span style={{ color: '#fff', fontWeight: 600 }}>{lobbyPlayers.join(' vs ')}</span>
-          </div>
-          <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px' }}>
-            Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canastra' : 'Canastras'} para ganar</span>
-          </div>
-        </div>
-
-
-        {/* Planilla Histórica de Rondas */}
-        {gameState.roundHistory && gameState.roundHistory.length > 0 && (
-          <div className="sidebar-section" style={{ borderTop: '1px solid var(--glass-border)' }}>
-            <h2 className="sidebar-title" style={{ color: '#34d399', marginBottom: '8px' }}>Planilla de Rondas</h2>
-            <div style={{ maxHeight: '120px', overflowY: 'auto', fontSize: '0.72rem' }}>
-              <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
-                <thead>
-                  <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
-                    <th style={{ padding: '3px 4px' }}>Ronda</th>
-                    <th style={{ padding: '3px 4px' }}>{gameState.players?.[0]?.name || 'J1'}</th>
-                    <th style={{ padding: '3px 4px' }}>{gameState.players?.[1]?.name || 'J2'}</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {gameState.roundHistory && gameState.roundHistory.map((rh, idx) => (
-                    <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                      <td style={{ padding: '3px 4px', fontWeight: 'bold' }}>R{rh.round}</td>
-                      <td style={{ padding: '3px 4px', color: (rh.totals?.[0] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
-                        {(rh.totals?.[0] || 0) >= 0 ? `+${rh.totals?.[0] || 0}` : rh.totals?.[0] || 0}
-                      </td>
-                      <td style={{ padding: '3px 4px', color: (rh.totals?.[1] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
-                        {(rh.totals?.[1] || 0) >= 0 ? `+${rh.totals?.[1] || 0}` : rh.totals?.[1] || 0}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        {/* Selector de Pestañas (solo en modo 4 jugadores) */}
+        {is4P && (
+          <div style={{
+            display: 'flex',
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
+            background: 'rgba(0,0,0,0.15)',
+            padding: '4px'
+          }}>
+            <button
+              onClick={() => setActiveTab('detalle')}
+              style={{
+                flex: 1,
+                padding: '8px',
+                background: activeTab === 'detalle' ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: 'none',
+                borderRadius: '6px',
+                color: activeTab === 'detalle' ? '#c084fc' : '#94a3b8',
+                fontWeight: 'bold',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              📊 Detalle
+            </button>
+            <button
+              onClick={() => setActiveTab('mesa')}
+              style={{
+                flex: 1,
+                padding: '8px',
+                background: activeTab === 'mesa' ? 'rgba(255,255,255,0.08)' : 'transparent',
+                border: 'none',
+                borderRadius: '6px',
+                color: activeTab === 'mesa' ? '#c084fc' : '#94a3b8',
+                fontWeight: 'bold',
+                fontSize: '0.8rem',
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '6px'
+              }}
+            >
+              🎴 Mesa (Asientos)
+            </button>
           </div>
         )}
 
-        {/* Tabla de puntajes */}
-        <Scoreboard gameState={gameState} playerIndex={playerIndex} onChangeTargetScore={handleEditTargetScore} />
-
-        {/* Historial de Acciones / Log de Turnos */}
-        <div className="sidebar-section" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <h2 className="sidebar-title" style={{ marginBottom: '6px' }}>Historial</h2>
-          <div className="action-log">
-            {logs.map((log, idx) => (
-              <div key={idx} className="log-entry">
-                {log}
+        {/* CONTENIDO DE LA PESTAÑA SELECCIONADA */}
+        {(activeTab === 'detalle' || !is4P) ? (
+          <>
+            {/* Info general */}
+            <div className="sidebar-section" style={{ background: 'rgba(0,0,0,0.15)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <span style={{ fontWeight: 800, color: '#10b981' }}>SALA ACTIVA</span>
+                <div style={{ display: 'flex', gap: '6px' }}>
+                  <button className="btn-header" onClick={handleRestart} title="Reiniciar ronda actual">
+                    <RefreshCw size={14} />
+                  </button>
+                  <button className="btn-header" onClick={handleResetAll} title="Resetear puntos globales">
+                    Reset General
+                  </button>
+                </div>
               </div>
-            ))}
-            <div ref={logEndRef} />
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
+                Jugadores: <span style={{ color: '#fff', fontWeight: 600 }}>{lobbyPlayers.join(' vs ')}</span>
+              </div>
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px' }}>
+                Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canastra' : 'Canastras'} para ganar</span>
+              </div>
+            </div>
+
+            {/* Planilla Histórica de Rondas */}
+            {gameState.roundHistory && gameState.roundHistory.length > 0 && (
+              <div className="sidebar-section" style={{ borderTop: '1px solid var(--glass-border)' }}>
+                <h2 className="sidebar-title" style={{ color: '#34d399', marginBottom: '8px' }}>Planilla de Rondas</h2>
+                <div style={{ maxHeight: '120px', overflowY: 'auto', fontSize: '0.72rem' }}>
+                  <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
+                    <thead>
+                      <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
+                        <th style={{ padding: '3px 4px' }}>Ronda</th>
+                        <th style={{ padding: '3px 4px' }}>{gameState.players?.[0]?.name || 'J1'}</th>
+                        <th style={{ padding: '3px 4px' }}>{gameState.players?.[1]?.name || 'J2'}</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {gameState.roundHistory && gameState.roundHistory.map((rh, idx) => (
+                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                          <td style={{ padding: '3px 4px', fontWeight: 'bold' }}>R{rh.round}</td>
+                          <td style={{ padding: '3px 4px', color: (rh.totals?.[0] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
+                            {(rh.totals?.[0] || 0) >= 0 ? `+${rh.totals?.[0] || 0}` : rh.totals?.[0] || 0}
+                          </td>
+                          <td style={{ padding: '3px 4px', color: (rh.totals?.[1] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
+                            {(rh.totals?.[1] || 0) >= 0 ? `+${rh.totals?.[1] || 0}` : rh.totals?.[1] || 0}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
+            {/* Tabla de puntajes */}
+            <Scoreboard gameState={gameState} playerIndex={playerIndex} onChangeTargetScore={handleEditTargetScore} />
+
+            {/* Historial de Acciones / Log de Turnos */}
+            <div className="sidebar-section" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+              <h2 className="sidebar-title" style={{ marginBottom: '6px' }}>Historial</h2>
+              <div className="action-log">
+                {logs.map((log, idx) => (
+                  <div key={idx} className="log-entry">
+                    {log}
+                  </div>
+                ))}
+                <div ref={logEndRef} />
+              </div>
+            </div>
+          </>
+        ) : (
+          <div className="sidebar-section" style={{ flexGrow: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
+            <h2 className="sidebar-title" style={{ color: '#fbbf24', alignSelf: 'flex-start', marginBottom: '10px' }}>Mapa de Asientos</h2>
+            
+            {/* REPRESENTACION DE LA MESA */}
+            <div style={{
+              position: 'relative',
+              width: '190px',
+              height: '190px',
+              margin: '25px auto',
+              background: 'radial-gradient(circle, #0f5132 0%, #082f1e 100%)',
+              borderRadius: '50%',
+              border: '6px solid #334155',
+              boxShadow: 'inset 0 0 15px rgba(0,0,0,0.8), 0 4px 10px rgba(0,0,0,0.5)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center'
+            }}>
+              {/* Centro de la mesa */}
+              <div style={{ textAlign: 'center', pointerEvents: 'none', userSelect: 'none', opacity: 0.15 }}>
+                <div style={{ fontSize: '0.8rem', fontWeight: 800, letterSpacing: '2px', color: '#fff' }}>BURACO</div>
+                <div style={{ fontSize: '0.45rem', letterSpacing: '1px', color: '#fff' }}>MESA</div>
+              </div>
+
+              {/* NORTE (Arriba) - Índice 2 */}
+              {renderSidebarSeat(2, { top: '-24px', left: '50%', transform: 'translateX(-50%)' })}
+
+              {/* ESTE (Derecha) - Índice 1 */}
+              {renderSidebarSeat(1, { top: '50%', right: '-32px', transform: 'translateY(-50%)' })}
+
+              {/* SUR (Abajo) - Índice 0 */}
+              {renderSidebarSeat(0, { bottom: '-24px', left: '50%', transform: 'translateX(-50%)' })}
+
+              {/* OESTE (Izquierda) - Índice 3 */}
+              {renderSidebarSeat(3, { top: '50%', left: '-32px', transform: 'translateY(-50%)' })}
+            </div>
+
+            <div style={{ fontSize: '0.72rem', color: '#94a3b8', marginTop: '20px', textAlign: 'center', padding: '0 8px', lineHeight: '1.4' }}>
+              💡 <b>Sur</b> es el jugador inicial. El turno corre en sentido antihorario (hacia la derecha). Las posiciones físicas son fijas.
+            </div>
           </div>
-        </div>
+        )}
 
       </div>
 
