@@ -172,14 +172,22 @@ export default function App() {
 
       {/* Encabezado general */}
       <header className="game-header">
-        <div style={{ display: 'flex', alignItems: 'baseline', gap: '8px' }}>
-          <h1 className="game-title" style={{ margin: 0 }}>
-            <span>🃏</span> BURACO MULTIJUGADOR
-          </h1>
-          <span style={{ fontSize: '0.85rem', color: '#fbbf24', fontStyle: 'italic', fontWeight: '500', marginLeft: '6px' }}>
+        <h1 className="game-title" style={{ margin: 0 }}>
+          <span>🃏</span> BURACO MULTIJUGADOR 
+          <span style={{ 
+            fontSize: '0.8rem', 
+            color: '#fbbf24', 
+            fontStyle: 'italic', 
+            fontWeight: 'normal', 
+            marginLeft: '8px',
+            letterSpacing: 'normal',
+            WebkitTextFillColor: '#fbbf24',
+            WebkitBackgroundClip: 'unset',
+            background: 'none'
+          }}>
             powered by Marco Dominguez
           </span>
-        </div>
+        </h1>
         <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button 
             className="btn-header" 
