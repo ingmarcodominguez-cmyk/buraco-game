@@ -491,38 +491,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
         </div>
       )}
 
-      {gameState.status === 'finished-visual' && (
-        <div className="starting-alert-overlay" style={{ zIndex: 1100, pointerEvents: 'auto' }}>
-          <div className="starting-alert-card glass-panel" style={{ animation: 'alertScaleUp 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) forwards', border: '2px solid #10b981', maxWidth: '420px', padding: '24px', textAlign: 'center' }}>
-            <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🎴</div>
-            <h2 className="alert-title" style={{ color: '#10b981', fontSize: '1.4rem' }}>
-              ¡Ronda Finalizada!
-            </h2>
-            <div className="alert-divider" style={{ background: '#10b981' }}></div>
-            <p className="alert-message" style={{ fontSize: '1.05rem', fontWeight: 600, color: '#fff', margin: '15px 0' }}>
-              {gameState.players?.[gameState.cutterIndex]?.name || 'Un jugador'} bate la mano
-            </p>
-            <p style={{ fontSize: '0.8rem', color: '#94a3b8', marginBottom: '20px', lineHeight: '1.4' }}>
-              La última carta de descarte se colocó boca abajo. Puedes examinar el estado de los juegos en la mesa antes de continuar.
-            </p>
-            <button 
-              className="btn-primary" 
-              onClick={() => onAction('show-scores-sheet')}
-              style={{ 
-                width: '100%', 
-                padding: '12px', 
-                fontSize: '0.95rem', 
-                background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)', 
-                border: 'none', 
-                fontWeight: 'bold',
-                borderRadius: '8px'
-              }}
-            >
-              Ver Puntaje 📊
-            </button>
-          </div>
-        </div>
-      )}
+
       
       {/* AREA DE JUEGO PRINCIPAL */}
       <div className="main-playarea">
@@ -743,6 +712,53 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               <div className={`morto-dot ${gameState.mortos[1] ? '' : 'taken'}`} title={gameState.mortos[1] ? 'Muerto 2 listo' : 'Muerto 2 tomado'}></div>
             </div>
           </div>
+
+          {/* Cartel de Ronda Finalizada (al lado del pozo) */}
+          {gameState.status === 'finished-visual' && (
+            <div 
+              className="glass-panel" 
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'center',
+                alignItems: 'center',
+                padding: '10px 14px',
+                border: '2px solid #fbbf24',
+                borderRadius: '10px',
+                background: 'rgba(15, 23, 42, 0.95)',
+                marginLeft: '15px',
+                maxWidth: '260px',
+                textAlign: 'center',
+                boxShadow: '0 8px 20px rgba(0,0,0,0.6)',
+                zIndex: 10
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fbbf24', fontWeight: 'bold', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+                <span>🎴</span>
+                <span>Ronda Finalizada</span>
+              </div>
+              <p style={{ fontSize: '0.75rem', color: '#fff', margin: '4px 0 8px 0', fontWeight: 600, lineHeight: '1.2' }}>
+                ¡{gameState.players?.[gameState.cutterIndex]?.name || 'Un jugador'} ha batido la mano!
+              </p>
+              <button 
+                className="btn-primary" 
+                onClick={() => onAction('show-scores-sheet')}
+                style={{ 
+                  width: '100%', 
+                  padding: '6px 12px', 
+                  fontSize: '0.75rem', 
+                  background: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)', 
+                  border: 'none', 
+                  color: '#000',
+                  fontWeight: 'bold',
+                  borderRadius: '5px',
+                  cursor: 'pointer'
+                }}
+              >
+                Ver Puntajes 📊
+              </button>
+            </div>
+          )}
         </div>
 
         {/* MI ZONA DE JUEGOS BAJADOS */}
