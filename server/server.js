@@ -1443,6 +1443,178 @@ function runBotTurn(botIdx) {
   }, 1500);
 }
 
+// SIMULADOR DE BAJADA DE LA IA PARA CÁLCULO DE PUNTOS Y CARTAS JUGADAS
+function simulateBotMelding(hand, existingMelds) {
+  let tempHand = [...hand];
+  let tempMelds = existingMelds.map(m => [...m]);
+  let cardsPlayed = 0;
+
+  // 1. Simular acoples a juegos existentes
+  let tempAppended = false;
+  do {
+    tempAppended = false;
+    for (let mIdx = 0; mIdx < tempMelds.length; mIdx++) {
+      const currentMeld = tempMelds[mIdx];
+      const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
+      for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
+        const card = tempHand[cIdx];
+        const combined = [...currentMeld, card];
+        const result = validateMeld(combined);
+        if (result.valid) {
+          const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
+          if (isCurrentCleanCanastra && !isNewClean) continue;
+          tempMelds[mIdx] = result.cards;
+          tempHand.splice(cIdx, 1);
+          cardsPlayed++;
+          tempAppended = true;
+          break;
+        }
+      }
+      if (tempAppended) break;
+    }
+  } while (tempAppended);
+
+  // 2. Simular nuevas secuencias limpias
+  const suits = ['H', 'D', 'C', 'S'];
+  const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+  
+  for (let suit of suits) {
+    let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
+    suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
+    let run = [];
+    for (let i = 0; i < suitCards.length; i++) {
+      const card = suitCards[i];
+      if (run.length === 0) run.push(card);
+      else {
+        const lastVal = rankOrder[run[run.length - 1].rank];
+        const curVal = rankOrder[card.rank];
+        if (curVal === lastVal + 1) run.push(card);
+        else if (curVal > lastVal + 1) {
+          if (run.length >= 3) {
+            const result = validateMeld(run);
+            if (result.valid) {
+              tempMelds.push(result.cards);
+              cardsPlayed += run.length;
+              run.forEach(rc => {
+                const idx = tempHand.findIndex(c => c.id === rc.id);
+                if (idx !== -1) tempHand.splice(idx, 1);
+              });
+            }
+          }
+          run = [card];
+        }
+      }
+    }
+    if (run.length >= 3) {
+      const result = validateMeld(run);
+      if (result.valid) {
+        tempMelds.push(result.cards);
+        cardsPlayed += run.length;
+        run.forEach(rc => {
+          const idx = tempHand.findIndex(c => c.id === rc.id);
+          if (idx !== -1) tempHand.splice(idx, 1);
+        });
+      }
+    }
+  }
+
+  // 3. Simular nuevas secuencias sucias usando comodines
+  let wildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
+  if (wildcards.length > 0) {
+    for (let suit of suits) {
+      let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2');
+      suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
+      for (let i = 0; i < suitCards.length - 1; i++) {
+        if (wildcards.length === 0) break;
+        const c1 = suitCards[i];
+        const c2 = suitCards[i+1];
+        const v1 = rankOrder[c1.rank];
+        const v2 = rankOrder[c2.rank];
+        if (v2 === v1 + 1 || v2 === v1 + 2) {
+          const wc = wildcards[0];
+          const candidate = [c1, c2, wc];
+          const result = validateMeld(candidate);
+          if (result.valid) {
+            tempMelds.push(result.cards);
+            wildcards.shift();
+            cardsPlayed += 3;
+            [c1, c2, wc].forEach(rc => {
+              const idx = tempHand.findIndex(c => c.id === rc.id);
+              if (idx !== -1) tempHand.splice(idx, 1);
+            });
+            suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2');
+            suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
+            i = -1;
+          }
+        }
+      }
+    }
+  }
+
+  // 4. Simular nuevos grupos limpios
+  const rankGroups = {};
+  tempHand.forEach(card => {
+    if (card.rank !== '2' && card.rank !== 'Joker') {
+      if (!rankGroups[card.rank]) rankGroups[card.rank] = [];
+      rankGroups[card.rank].push(card);
+    }
+  });
+  for (const rank of Object.keys(rankGroups)) {
+    const groupCards = rankGroups[rank];
+    if (groupCards.length >= 3) {
+      const result = validateMeld(groupCards);
+      if (result.valid) {
+        tempMelds.push(result.cards);
+        cardsPlayed += groupCards.length;
+        groupCards.forEach(rc => {
+          const idx = tempHand.findIndex(c => c.id === rc.id);
+          if (idx !== -1) tempHand.splice(idx, 1);
+        });
+      }
+    }
+  }
+
+  // 5. Simular nuevos grupos sucios usando comodines
+  wildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
+  if (wildcards.length > 0) {
+    const remainingGroups = {};
+    tempHand.forEach(card => {
+      if (card.rank !== '2' && card.rank !== 'Joker') {
+        if (!remainingGroups[card.rank]) remainingGroups[card.rank] = [];
+        remainingGroups[card.rank].push(card);
+      }
+    });
+    for (const rank of Object.keys(remainingGroups)) {
+      if (wildcards.length === 0) break;
+      const groupCards = remainingGroups[rank];
+      if (groupCards.length === 2) {
+        const wc = wildcards[0];
+        const candidate = [...groupCards, wc];
+        const result = validateMeld(candidate);
+        if (result.valid) {
+          tempMelds.push(result.cards);
+          wildcards.shift();
+          cardsPlayed += 3;
+          candidate.forEach(rc => {
+            const idx = tempHand.findIndex(c => c.id === rc.id);
+            if (idx !== -1) tempHand.splice(idx, 1);
+          });
+        }
+      }
+    }
+  }
+
+  // Calcular puntos totales de los melds
+  let points = 0;
+  tempMelds.forEach(meld => {
+    meld.forEach(c => {
+      points += CARD_VALUES[c.rank] || 0;
+    });
+  });
+
+  return { cardsPlayed, points };
+}
+
 // REALIZA EXACTAMENTE UNA ACCIÓN DE ACOPLE O BAJAR UN JUEGO NUEVO
 function performOneBotMeldAction(botIdx) {
   let botPlayer = gameState.players[botIdx];
@@ -1463,75 +1635,17 @@ function performOneBotMeldAction(botIdx) {
   });
   const isAlreadyMelded = botMeldPoints >= 30;
 
-  // Simular para canTakeMortoThisTurn y canWinThisTurn
-  let tempHand = [...botHand];
-  let tempMelds = botMelds.map(m => [...m]);
-  let cardsPlayedCount = 0;
-  let tempAppended = false;
-  do {
-    tempAppended = false;
-    for (let mIdx = 0; mIdx < tempMelds.length; mIdx++) {
-      const currentMeld = tempMelds[mIdx];
-      const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
-      for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
-        const card = tempHand[cIdx];
-        const combined = [...currentMeld, card];
-        const result = validateMeld(combined);
-        if (result.valid) {
-          const isNewClean = !result.cards.some(c => c && c.isUsedAsWildcard);
-          if (isCurrentCleanCanastra && !isNewClean) continue;
-          tempMelds[mIdx] = result.cards;
-          tempHand.splice(cIdx, 1);
-          cardsPlayedCount++;
-          tempAppended = true;
-          break;
-        }
-      }
-      if (tempAppended) break;
-    }
-  } while (tempAppended);
-
-  const suitsList = ['H', 'D', 'C', 'S'];
-  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-  suitsList.forEach(suit => {
-    let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-    suitCards.sort((a, b) => (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0));
-    let run = [];
-    for (let i = 0; i < suitCards.length; i++) {
-      const card = suitCards[i];
-      if (run.length === 0) run.push(card);
-      else {
-        const lastVal = rankOrderVals[run[run.length - 1].rank];
-        const curVal = rankOrderVals[card.rank];
-        if (curVal === lastVal + 1) run.push(card);
-        else if (curVal > lastVal + 1) {
-          if (run.length >= 3) {
-            cardsPlayedCount += run.length;
-            run.forEach(rc => {
-              const idx = tempHand.findIndex(c => c.id === rc.id);
-              if (idx !== -1) tempHand.splice(idx, 1);
-            });
-          }
-          run = [card];
-        }
-      }
-    }
-    if (run.length >= 3) {
-      cardsPlayedCount += run.length;
-      run.forEach(rc => {
-        const idx = tempHand.findIndex(c => c.id === rc.id);
-        if (idx !== -1) tempHand.splice(idx, 1);
-      });
-    }
-  });
+  // Simular jugadas usando el simulador unificado para estimar cartas jugadas
+  const sim = simulateBotMelding(botHand, botMelds);
+  const cardsPlayedCount = sim.cardsPlayed;
 
   const canTakeMortoThisTurn = !botHasMorto && (botHand.length - cardsPlayedCount <= 1);
   const canastrasCount = botMelds.filter(m => m.length >= 7).length;
   const requiredCanastras = gameState.requiredCanastras || 1;
   const canWinThisTurn = botHasMorto && (botHand.length - cardsPlayedCount <= 1) && (canastrasCount >= requiredCanastras);
 
-  const isPartnerMode = gameState.is4Player;
-  const allowPlay = !isAlreadyMelded || isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
+  // Juega siempre de forma sigilosa (reteniendo cartas en mano) hasta que pueda ir al muerto, a menos que el rival ya tenga el muerto, sea partida de a 4, o el mazo se esté agotando.
+  const allowPlay = isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
 
   if (!allowPlay) return false;
 
@@ -1575,60 +1689,8 @@ function performOneBotMeldAction(botIdx) {
   
   // Si no está bajado, hay que comprobar si los juegos que queremos bajar suman >= 30
   if (!isAlreadyMelded) {
-    let simHand = [...botHand];
-    let simMeldsSum = 0;
-    
-    // Simular secuencias limpias
-    for (let suit of suits) {
-      let suitCards = simHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-      suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-      let run = [];
-      for (let i = 0; i < suitCards.length; i++) {
-        const card = suitCards[i];
-        if (run.length === 0) run.push(card);
-        else {
-          const lastVal = rankOrder[run[run.length - 1].rank];
-          const curVal = rankOrder[card.rank];
-          if (curVal === lastVal + 1) run.push(card);
-          else if (curVal > lastVal + 1) {
-            if (run.length >= 3) {
-              run.forEach(rc => {
-                simMeldsSum += CARD_VALUES[rc.rank] || 0;
-                const idx = simHand.findIndex(c => c.id === rc.id);
-                if (idx !== -1) simHand.splice(idx, 1);
-              });
-            }
-            run = [card];
-          }
-        }
-      }
-      if (run.length >= 3) {
-        run.forEach(rc => {
-          simMeldsSum += CARD_VALUES[rc.rank] || 0;
-          const idx = simHand.findIndex(c => c.id === rc.id);
-          if (idx !== -1) simHand.splice(idx, 1);
-        });
-      }
-    }
-    
-    // Grupos
-    const simRankGroups = {};
-    simHand.forEach(card => {
-      if (card.rank !== '2' && card.rank !== 'Joker') {
-        if (!simRankGroups[card.rank]) simRankGroups[card.rank] = [];
-        simRankGroups[card.rank].push(card);
-      }
-    });
-    Object.keys(simRankGroups).forEach(rank => {
-      const groupCards = simRankGroups[rank];
-      if (groupCards.length >= 3) {
-        groupCards.forEach(rc => {
-          simMeldsSum += CARD_VALUES[rc.rank] || 0;
-        });
-      }
-    });
-
-    if (simMeldsSum < 30) {
+    const openingSim = simulateBotMelding(botHand, []);
+    if (openingSim.points < 30) {
       return false; // No podemos bajar nada aún porque no sumamos 30
     }
   }
