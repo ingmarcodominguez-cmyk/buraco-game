@@ -1001,6 +1001,33 @@ io.on('connection', (socket) => {
     }
   });
 
+  // Simular corte/batida instantáneo (para pruebas/depuración)
+  socket.on('debug-simulate-batida', () => {
+    if (!gameState || gameState.status !== 'playing') return;
+
+    const pIdx = gameState.turn;
+    const hand = gameState.players[pIdx].hand;
+
+    // Obtener la última carta de la mano para descartarla, o usar una dummy si no tiene
+    const cardToDiscard = hand.length > 0 ? hand[hand.length - 1] : { id: 'dummy', rank: 'A', suit: 'H' };
+
+    if (hand.length > 0) {
+      hand.splice(hand.length - 1, 1);
+    }
+    
+    gameState.discardPile.push(cardToDiscard);
+    gameState.status = 'finished-visual';
+    gameState.winner = pIdx;
+    gameState.turnState = 'match-over-visual';
+    gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido la mano (Simulación de depuración)!`;
+    gameState.cutterIndex = pIdx;
+
+    // Calcular puntuaciones
+    gameState.roundScores = calculateRoundScores(gameState);
+
+    sendStateToAll();
+  });
+
   // Abandonar la partida explícitamente (abortar juego y limpiar lobby)
   socket.on('leave-game', () => {
     console.log(`Un jugador solicitó abandonar la partida: ${socket.id}`);

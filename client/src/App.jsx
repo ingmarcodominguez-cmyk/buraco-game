@@ -204,6 +204,27 @@ export default function App() {
                 <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
                   Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
                 </span>
+                {gameState && gameState.status === 'playing' && (
+                  <button 
+                    className="btn-header" 
+                    onClick={() => {
+                      if (window.confirm('¿Quieres simular que el jugador actual bate la ronda para probar la pantalla de corte?')) {
+                        socket.emit('debug-simulate-batida');
+                      }
+                    }}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '6px', 
+                      background: 'rgba(245, 158, 11, 0.2)', 
+                      border: '1px solid rgba(245, 158, 11, 0.5)',
+                      color: '#fbbf24'
+                    }}
+                    title="Simular corte instantáneo para verificar el diseño visual de la mesa"
+                  >
+                    Simular Corte ⚡
+                  </button>
+                )}
                 <button 
                   className="btn-header" 
                   onClick={() => {
