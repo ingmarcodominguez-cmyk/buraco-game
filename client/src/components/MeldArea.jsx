@@ -55,7 +55,7 @@ export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOppo
             >
               {isCanastra && (
                 <div className={`canastra-badge ${canastraType}`}>
-                  Canastra {canastraType === 'limpa' ? 'Limpia' : 'Sucia'}
+                  Canasta {canastraType === 'limpa' ? 'Limpia' : 'Sucia'}
                 </div>
               )}
               

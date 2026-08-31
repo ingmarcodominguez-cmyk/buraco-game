@@ -91,7 +91,7 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                 <div className="form-group" style={{ marginBottom: '14px' }}>
                   <label className="form-label" htmlFor="required-canastras" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <Award size={14} /> Canastras para Terminar (Batida)
+                      <Award size={14} /> Canastas para Terminar (Batida)
                     </span>
                   </label>
                   <select
@@ -101,8 +101,8 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                     onChange={(e) => setRequiredCanastras(Number(e.target.value))}
                     style={{ cursor: 'pointer', padding: '8px 12px', fontSize: '0.9rem' }}
                   >
-                    <option value={1}>1 Canastra (Partida rápida)</option>
-                    <option value={2}>2 Canastras (Estándar)</option>
+                    <option value={1}>1 Canasta (Partida rápida)</option>
+                    <option value={2}>2 Canastas (Estándar)</option>
                   </select>
                 </div>
 

@@ -1067,7 +1067,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 Jugadores: <span style={{ color: '#fff', fontWeight: 600 }}>{lobbyPlayers.join(' vs ')}</span>
               </div>
               <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px' }}>
-                Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canastra' : 'Canastras'} para ganar</span>
+                Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canasta' : 'Canastas'} para ganar</span>
               </div>
             </div>
 
@@ -1262,8 +1262,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 onChange={(e) => setScoreForm(prev => ({ ...prev, p1Mesa: Number(e.target.value) }))}
               />
 
-              {/* Canastras Limpias */}
-              <span style={{ fontSize: '0.9rem' }}>Canastras Limpias (x200)</span>
+              {/* Canastas Limpias */}
+              <span style={{ fontSize: '0.9rem' }}>Canastas Limpias (x200)</span>
               <input 
                 type="number" 
                 className="input-text" 
@@ -1279,8 +1279,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 onChange={(e) => setScoreForm(prev => ({ ...prev, p1Limpias: Number(e.target.value) }))}
               />
 
-              {/* Canastras Sucias */}
-              <span style={{ fontSize: '0.9rem' }}>Canastras Sucias (x100)</span>
+              {/* Canastas Sucias */}
+              <span style={{ fontSize: '0.9rem' }}>Canastas Sucias (x100)</span>
               <input 
                 type="number" 
                 className="input-text" 

@@ -49,7 +49,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
     let handPoints = 0;
     let mortoPenalty = 0;
     let goOutBonus = 0;
-    let roundTotal = 0;
+    let roundTotal = meldPoints + cleanCanastraPoints + dirtyCanastraPoints;
     
     if (gameState.status === 'finished') {
       playersInTeam.forEach(pIdx => {
@@ -138,7 +138,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
             <td style={{ color: '#34d399' }}>+{oppBreakdown.meldPoints}</td>
           </tr>
           <tr>
-            <td>Canastras Limpias (x2)</td>
+            <td>Canastas Limpias (x2)</td>
             <td style={{ color: '#fbbf24' }}>
               +{myBreakdown.cleanCanastraPoints} <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({myBreakdown.cleanCanastras})</span>
             </td>
@@ -147,7 +147,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
             </td>
           </tr>
           <tr>
-            <td>Canastras Sucias (x1)</td>
+            <td>Canastas Sucias (x1)</td>
             <td style={{ color: '#cbd5e1' }}>
               +{myBreakdown.dirtyCanastraPoints} <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({myBreakdown.dirtyCanastras})</span>
             </td>

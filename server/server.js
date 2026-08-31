@@ -597,7 +597,7 @@ io.on('connection', (socket) => {
 
     if (hand.length - cards.length < minCardsHand) {
       if (minCardsHand === 2) {
-        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastras para batir y debes conservar al menos una para tu descarte.');
+        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
       } else {
         socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
       }
@@ -682,7 +682,7 @@ io.on('connection', (socket) => {
 
     if (hand.length - cards.length < minCardsHand) {
       if (minCardsHand === 2) {
-        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastras para batir y debes conservar al menos una para tu descarte.');
+        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
       } else {
         socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
       }
@@ -745,7 +745,7 @@ io.on('connection', (socket) => {
 
     if (hand.length === 1) {
       if (hasTakenMorto && canastrasCount < requiredCanastras) {
-        socket.emit('error-message', `No puedes terminar (bater) sin tener al menos ${requiredCanastras} ${requiredCanastras === 1 ? 'canastra' : 'canastras'}. (Tenés ${canastrasCount}).`);
+        socket.emit('error-message', `No puedes terminar (bater) sin tener al menos ${requiredCanastras} ${requiredCanastras === 1 ? 'canasta' : 'canastas'}. (Tenés ${canastrasCount}).`);
         return;
       }
 
@@ -1873,7 +1873,7 @@ function runBotDiscardPhase(botIdx) {
         gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
         checkMortoIndirect(botIdx);
       } else {
-        gameState.lastAction = `${botPlayer.name} pasa sin descartar por falta de canastras o decisión estratégica.`;
+        gameState.lastAction = `${botPlayer.name} pasa sin descartar por falta de canastas o decisión estratégica.`;
       }
     }
   } else {
