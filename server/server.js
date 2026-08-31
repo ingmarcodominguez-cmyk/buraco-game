@@ -1645,8 +1645,8 @@ function performOneBotMeldAction(botIdx) {
   const canWinThisTurn = botHasMorto && (botHand.length - cardsPlayedCount <= 1) && (canastrasCount >= requiredCanastras);
 
   const isPartnerMode = gameState.is4Player;
-  // Juega siempre de forma sigilosa (reteniendo cartas en mano) hasta que pueda ir al muerto, a menos que el rival ya tenga el muerto, sea partida de a 4, o el mazo se esté agotando.
-  const allowPlay = isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
+  // No juega sigiloso en la primera bajada (para poder abrir cuanto antes con 30 pts), pero sí juega sigiloso de ahí en adelante hasta que pueda ir al muerto, o bien cuando el rival tenga el muerto, sea partida de a 4, o el mazo esté bajo.
+  const allowPlay = !isAlreadyMelded || isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
 
   if (!allowPlay) return false;
 
