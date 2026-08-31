@@ -1623,7 +1623,14 @@ function performOneBotMeldAction(botIdx) {
   let botMelds = gameState.players[teamIdx].melds;
 
   const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
+  const opponentPlayer = gameState.players[opponentTeamIdx];
+  const opponentHandSize = opponentPlayer?.hand?.length || 0;
+  const opponentMelds = opponentPlayer?.melds || [];
+  const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+  const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+  const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
   const opponentHasMorto = gameState.is4Player ? (gameState.mortosTaken[opponentTeamIdx] !== null) : gameState.mortosTaken[opponentTeamIdx];
+  const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
   const botHasMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
   const deckCount = gameState.drawPile.length;
 
@@ -1662,7 +1669,7 @@ function performOneBotMeldAction(botIdx) {
 
       const isWildcard = card.rank === '2' || card.rank === 'Joker';
       const completesCanastra = currentMeld.length === 6;
-      const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn) : true;
+      const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn || opponentImminentWin) : true;
       if (!wildcardsAllowed) continue;
 
       const combined = [...currentMeld, card];
@@ -1792,86 +1799,99 @@ function runBotDiscardPhase(botIdx) {
   const opponentPlayer = gameState.players[opponentTeamIdx];
   const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
 
+  // Detectar Modo Emergencia: El rival ya tiene muerto, tiene canasta y le quedan 3 o menos cartas en la mano
+  const opponentHandSize = opponentPlayer?.hand?.length || 0;
+  const opponentMelds = opponentPlayer?.melds || [];
+  const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+  const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+  const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
+  const opponentHasMorto = gameState.is4Player ? (gameState.mortosTaken[opponentTeamIdx] !== null) : gameState.mortosTaken[opponentTeamIdx];
+  const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
+
   for (let i = 0; i < botHand.length; i++) {
     const card = botHand[i];
     let score = 0;
 
-    // Valor de comodines (muy alto para retenerlos)
-    if (card.rank === 'Joker') score += 1000;
-    else if (card.rank === '2') score += 500;
-    else {
-      // Valor por conexiones y palo
-      const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
-      score += sameSuitCount * 10;
-      score += (CARD_VALUES[card.rank] || 5);
-      
-      const connects = getConnectionsCount(card, botHand);
-      score += connects * 100;
-    }
+    if (opponentImminentWin) {
+      // Modo Emergencia: descartar las cartas de mayor valor para minimizar penalización en mano si el rival corta
+      score = -CARD_VALUES[card.rank];
+    } else {
+      // Valor de comodines (muy alto para retenerlos)
+      if (card.rank === 'Joker') score += 1000;
+      else if (card.rank === '2') score += 500;
+      else {
+        // Valor por conexiones y palo
+        const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
+        score += sameSuitCount * 10;
+        score += (CARD_VALUES[card.rank] || 5);
+        
+        const connects = getConnectionsCount(card, botHand);
+        score += connects * 100;
+      }
 
-    // Penalización por duplicados (hace que sea preferible descartarla)
-    const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
-    if (duplicates > 0) {
-      score -= 80;
-    }
+      // Penalización por duplicados (hace que sea preferible descartarla)
+      const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
+      if (duplicates > 0) {
+        score -= 80;
+      }
 
-    // Filtro de peligro contra oponentes
-    let servesOpponent = false;
-    if (opponentPlayer && opponentPlayer.melds) {
-      for (const meld of opponentPlayer.melds) {
-        if (validateMeld([...meld, card]).valid) {
-          servesOpponent = true;
-          break;
+      // Filtro de peligro contra oponentes
+      let servesOpponent = false;
+      if (opponentPlayer && opponentPlayer.melds) {
+        for (const meld of opponentPlayer.melds) {
+          if (validateMeld([...meld, card]).valid) {
+            servesOpponent = true;
+            break;
+          }
         }
       }
-    }
 
-    let adjacentToOpponentMeld = false;
-    if (opponentPlayer && opponentPlayer.melds) {
-      for (const meld of opponentPlayer.melds) {
-        if (meld.length > 0 && meld[0].suit === card.suit) {
-          const rankVals = meld.map(c => rankOrderVals[c.rank]).filter(Boolean);
-          if (rankVals.length > 0) {
-            const minVal = Math.min(...rankVals);
-            const maxVal = Math.max(...rankVals);
-            const cardVal = rankOrderVals[card.rank];
-            if (cardVal === minVal - 1 || cardVal === maxVal + 1) {
-              adjacentToOpponentMeld = true;
-              break;
+      let adjacentToOpponentMeld = false;
+      if (opponentPlayer && opponentPlayer.melds) {
+        for (const meld of opponentPlayer.melds) {
+          if (meld.length > 0 && meld[0].suit === card.suit) {
+            const rankVals = meld.map(c => rankOrderVals[c.rank]).filter(Boolean);
+            if (rankVals.length > 0) {
+              const minVal = Math.min(...rankVals);
+              const maxVal = Math.max(...rankVals);
+              const cardVal = rankOrderVals[card.rank];
+              if (cardVal === minVal - 1 || cardVal === maxVal + 1) {
+                adjacentToOpponentMeld = true;
+                break;
+              }
             }
           }
         }
       }
-    }
 
-    let dangerPenalty = 0;
-    if (servesOpponent) dangerPenalty += 500;
-    else if (adjacentToOpponentMeld) dangerPenalty += 250;
+      let dangerPenalty = 0;
+      if (servesOpponent) dangerPenalty += 500;
+      else if (adjacentToOpponentMeld) dangerPenalty += 250;
 
-    // Defensa: Bloqueo de salida si al rival le quedan pocas cartas
-    const opponentHandSize = opponentPlayer?.hand?.length || 0;
-    if (opponentHandSize <= 3 && servesOpponent) {
-      dangerPenalty += 500;
-    }
+      // Defensa: Bloqueo de salida si al rival le quedan pocas cartas
+      if (opponentHandSize <= 3 && servesOpponent) {
+        dangerPenalty += 500;
+      }
 
-    // APLICACIÓN DE LA REGLA DE BLOQUEO DEL MUERTO:
-    if (nextPlayerBlocked) {
-      dangerPenalty = 0;
-      const partnerIdx = (botIdx + 2) % 4;
-      const partnerMelds = gameState.players[teamIdx]?.melds || [];
-      let servesPartner = false;
-      for (const meld of partnerMelds) {
-        if (validateMeld([...meld, card]).valid) {
-          servesPartner = true;
-          break;
+      // APLICACIÓN DE LA REGLA DE BLOQUEO DEL MUERTO:
+      if (nextPlayerBlocked) {
+        dangerPenalty = 0;
+        const partnerIdx = (botIdx + 2) % 4;
+        const partnerMelds = gameState.players[teamIdx]?.melds || [];
+        let servesPartner = false;
+        for (const meld of partnerMelds) {
+          if (validateMeld([...meld, card]).valid) {
+            servesPartner = true;
+            break;
+          }
+        }
+        if (servesPartner) {
+          score -= 600;
         }
       }
-      if (servesPartner) {
-        score -= 600;
-      }
-    }
 
-    score += dangerPenalty;
+      score += dangerPenalty;
+    }
 
     if (score < minScore) {
       minScore = score;
