@@ -1338,8 +1338,20 @@ function runBotTurn(botIdx) {
     const hasMelded = botMeldPoints >= 30;
 
     if (hasMelded) {
-      // Evaluar la utilidad de levantar del pozo
-      // 1. ¿Sirve para acoplar a un juego existente?
+      const botHasMorto = gameState.is4Player 
+        ? (gameState.mortosTaken[teamIdx] !== null) 
+        : Boolean(gameState.mortosTaken[botIdx]);
+      const opponentHasMorto = gameState.is4Player 
+        ? (gameState.mortosTaken[opponentTeamIdx] !== null) 
+        : Boolean(gameState.mortosTaken[opponentTeamIdx]);
+
+      const opponentPlayer = gameState.players[opponentTeamIdx];
+      const opponentHandSize = opponentPlayer?.hand?.length || 0;
+      const opponentMelds = opponentPlayer?.melds || [];
+      const oppCanastras = opponentMelds.filter(m => m.length >= 7).length;
+      const opponentImminentWin = opponentHasMorto && oppCanastras > 0 && opponentHandSize <= 3;
+
+      // 1. Evaluar si la carta superior sirve (acople, nueva combinación o comodín)
       let servesForAppend = false;
       for (const meld of teamMelds) {
         if (validateMeld([...meld, topDiscard]).valid) {
@@ -1348,33 +1360,64 @@ function runBotTurn(botIdx) {
         }
       }
 
-      // 2. ¿Sirve para armar una nueva secuencia en nuestra mano?
-      let servesForNewMeld = false;
-      const cardVal = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-      const sameSuitHand = botHand.filter(c => c.suit === topDiscard.suit);
-      if (sameSuitHand.length >= 2) {
-        // Buscar si forma escalera con cartas en mano
-        const topVal = cardVal[topDiscard.rank] || 0;
-        sameSuitHand.forEach(c1 => {
-          const v1 = cardVal[c1.rank] || 0;
-          sameSuitHand.forEach(c2 => {
-            const v2 = cardVal[c2.rank] || 0;
-            if (c1.id !== c2.id) {
-              const vals = [topVal, v1, v2].sort((a, b) => a - b);
-              if (vals[1] === vals[0] + 1 && vals[2] === vals[1] + 1) {
-                servesForNewMeld = true;
-              }
-            }
-          });
-        });
-      }
-
-      // 3. ¿Es un comodín (2 o Joker)?
+      const simCurrent = simulateBotMelding(botHand, teamMelds);
+      const simWithTop = simulateBotMelding([...botHand, topDiscard], teamMelds);
+      const servesForNewMeld = simWithTop.cardsPlayed > simCurrent.cardsPlayed;
       const isWildcard = topDiscard.rank === '2' || topDiscard.rank === 'Joker';
+      const topCardServes = servesForAppend || servesForNewMeld || isWildcard;
 
-      // Decidir robar del pozo si hay interés o si el pozo es grande (acumular valor)
-      if (servesForAppend || servesForNewMeld || isWildcard || gameState.discardPile.length >= 3) {
+      // 2. Simular qué ocurre si recogemos TODO el pozo
+      const simWithDiscard = simulateBotMelding([...botHand, ...gameState.discardPile], teamMelds);
+      const remainingWithDiscard = (botHand.length + gameState.discardPile.length) - simWithDiscard.cardsPlayed;
+      const currentRemaining = botHand.length - simCurrent.cardsPlayed;
+      const cardsGainedFromPile = simWithDiscard.cardsPlayed - simCurrent.cardsPlayed;
+      const unplayableAdded = gameState.discardPile.length - cardsGainedFromPile;
+
+      // 3. Evaluar si permite ir al muerto o batir de inmediato
+      const canTakeMortoWithDiscard = !botHasMorto && (remainingWithDiscard <= 1);
+      const canWinWithDiscard = botHasMorto && (remainingWithDiscard <= 1) && ((teamMelds.filter(m => m.length >= 7).length) >= (gameState.requiredCanastras || 1));
+
+      if (canTakeMortoWithDiscard || canWinWithDiscard) {
+        // Prioridad máxima: si levantar el pozo permite ir al muerto o batir en este mismo turno, se levanta sin dudar
         drewFromDiscard = true;
+      } else if (opponentImminentWin) {
+        // En Modo Emergencia (el rival ya tiene muerto, canasta y le quedan <=3 cartas):
+        // NUNCA levantar cartas basura que sumen penalización negativa en la mano.
+        // Solo levantar si la carta superior sirve y TODAS las cartas del pozo se bajan de inmediato.
+        if (topCardServes && unplayableAdded === 0) {
+          drewFromDiscard = true;
+        }
+      } else if (!botHasMorto) {
+        // La IA aún NO fue al muerto:
+        if (opponentHasMorto) {
+          // El rival YA fue al muerto: la urgencia de ir al muerto es MÁXIMA.
+          // NUNCA llenarse de cartas que retrasen ir al muerto (unplayableAdded > 0).
+          // Solo levantar si la carta superior sirve Y no se agrega ninguna carta muerta a la mano (unplayableAdded === 0).
+          // En caso contrario, buscar en el mazo la posibilidad de ir al muerto con una sola carta.
+          if (topCardServes && unplayableAdded === 0) {
+            drewFromDiscard = true;
+          }
+        } else {
+          // Ninguno de los dos fue al muerto aún:
+          // Si a la IA le quedan pocas cartas en mano (<= 4) o las cartas restantes aumentarían, no llenarse de cartas
+          if (botHand.length <= 4 || currentRemaining <= 3) {
+            if (topCardServes && unplayableAdded === 0) {
+              drewFromDiscard = true;
+            }
+          } else {
+            // Con mano amplia inicial, puede levantar si la carta superior sirve y prácticamente todo el pozo se aprovecha
+            // (a lo sumo 1 carta muerta agregada)
+            if (topCardServes && unplayableAdded <= 1) {
+              drewFromDiscard = true;
+            }
+          }
+        }
+      } else {
+        // La IA YA fue al muerto (juego regular post-muerto):
+        // Levanta si la carta superior sirve y no se llena desmedidamente de cartas muertas
+        if (topCardServes && (unplayableAdded <= 2 || gameState.discardPile.length <= 2)) {
+          drewFromDiscard = true;
+        }
       }
     }
   }
