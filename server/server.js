@@ -1692,20 +1692,26 @@ function performOneBotMeldAction(botIdx) {
   });
   const isAlreadyMelded = botMeldPoints >= 30;
 
+  // Comprobar apertura inicial de 30 puntos si no está bajado
+  if (!isAlreadyMelded) {
+    const openingSim = simulateBotMelding(botHand, []);
+    if (openingSim.points < 30) {
+      return false; // No podemos bajar nada aún porque no sumamos 30
+    }
+  }
+
   // Simular jugadas usando el simulador unificado para estimar cartas jugadas
   const sim = simulateBotMelding(botHand, botMelds);
   const cardsPlayedCount = sim.cardsPlayed;
 
-  const canTakeMortoThisTurn = !botHasMorto && (botHand.length - cardsPlayedCount <= 1);
+  // PRIORIDAD 1: Ganar la mano (si ya tiene muerto y canasta requerida)
   const canastrasCount = botMelds.filter(m => m.length >= 7).length;
   const requiredCanastras = gameState.requiredCanastras || 1;
   const canWinThisTurn = botHasMorto && (botHand.length - cardsPlayedCount <= 1) && (canastrasCount >= requiredCanastras);
 
-  const isPartnerMode = gameState.is4Player;
-  // No juega sigiloso en la primera bajada (para poder abrir cuanto antes con 30 pts), pero sí juega sigiloso de ahí en adelante hasta que pueda ir al muerto, o bien cuando el rival tenga el muerto, sea partida de a 4, o el mazo esté bajo.
-  const allowPlay = !isAlreadyMelded || isPartnerMode || opponentHasMorto || deckCount < 10 || canTakeMortoThisTurn || canWinThisTurn;
-
-  if (!allowPlay) return false;
+  // PRIORIDAD 2: Ir al muerto (vaciar la mano si no tiene muerto)
+  const canTakeMortoThisTurn = !botHasMorto && (botHand.length - cardsPlayedCount <= 1);
+  const isCloseToMorto = !botHasMorto && botHand.length <= 4;
 
   // 1. Intentar realizar exactamente UN acople
   const minCardsHand = !botHasMorto ? 0 : (canWinThisTurn ? 0 : 2);
@@ -1719,7 +1725,10 @@ function performOneBotMeldAction(botIdx) {
 
       const isWildcard = card.rank === '2' || card.rank === 'Joker';
       const completesCanastra = currentMeld.length === 6;
-      const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn || opponentImminentWin || isDefensiveSurvivalMode) : true;
+      // PRIORIDAD 3: Canastas limpias (cartas naturales acoplan libremente preservando limpieza)
+      // PRIORIDAD 4: Canastas sucias (comodines completan canasta de 7, o habilitan ir al muerto / ganar)
+      // Flexibilidad: si está cerca del muerto (<=4 cartas), puede usar comodín para vaciar mano
+      const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn || opponentImminentWin || isDefensiveSurvivalMode || isCloseToMorto) : true;
       if (!wildcardsAllowed) continue;
 
       const combined = [...currentMeld, card];
@@ -1744,14 +1753,6 @@ function performOneBotMeldAction(botIdx) {
   // 2. Intentar bajar exactamente un juego nuevo
   const suits = ['H', 'D', 'C', 'S'];
   const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-  
-  // Si no está bajado, hay que comprobar si los juegos que queremos bajar suman >= 30
-  if (!isAlreadyMelded) {
-    const openingSim = simulateBotMelding(botHand, []);
-    if (openingSim.points < 30) {
-      return false; // No podemos bajar nada aún porque no sumamos 30
-    }
-  }
 
   // Bajar secuencias limpias de 3 o más
   for (let suit of suits) {
