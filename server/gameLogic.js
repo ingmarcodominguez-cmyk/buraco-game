@@ -78,6 +78,13 @@ function validateSequence(cards) {
     return { valid: false, error: 'Todas las cartas naturales deben ser del mismo palo.' };
   }
 
+  // En Buraco una secuencia NO puede tener más de 1 carta especial (Joker o 2).
+  // Si tiene un 2 (incluso del mismo palo), no puede llevar Joker ni otro 2.
+  const specialCards = cards.filter(c => c.rank === 'Joker' || c.rank === '2');
+  if (specialCards.length > 1) {
+    return { valid: false, error: 'Una secuencia no puede tener más de un comodín o 2.' };
+  }
+
   const N = cards.length;
   if (N > 14) {
     return { valid: false, error: 'Una secuencia no puede tener más de 14 cartas.' };

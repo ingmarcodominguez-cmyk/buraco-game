@@ -733,20 +733,32 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                 zIndex: 10
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fbbf24', fontWeight: 'bold', fontSize: '0.8rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#fbbf24', fontWeight: 'bold', fontSize: '0.85rem', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
                 <span>🎴</span>
                 <span>Ronda Finalizada</span>
               </div>
-              <p style={{ fontSize: '0.75rem', color: '#fff', margin: '4px 0 8px 0', fontWeight: 600, lineHeight: '1.2' }}>
+              <p style={{ fontSize: '0.82rem', color: '#fff', margin: '6px 0 4px 0', fontWeight: 600, lineHeight: '1.3' }}>
                 ¡{gameState.players?.[gameState.cutterIndex]?.name || 'Un jugador'} ha batido la mano!
               </p>
+              {(() => {
+                const cutterIdx = gameState.cutterIndex !== null && typeof gameState.cutterIndex === 'number' ? gameState.cutterIndex : 0;
+                const cutterTeam = gameState.is4Player ? (cutterIdx === 0 || cutterIdx === 2 ? 0 : 1) : cutterIdx;
+                const cutterMelds = gameState.players?.[cutterTeam]?.melds || [];
+                const cleanCount = cutterMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+                const dirtyCount = cutterMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+                return (
+                  <div style={{ fontSize: '0.74rem', color: '#cbd5e1', marginBottom: '8px', background: 'rgba(255,255,255,0.05)', padding: '3px 8px', borderRadius: '4px' }}>
+                    Canastas: {cleanCount > 0 ? `${cleanCount} Limpia` : ''}{cleanCount > 0 && dirtyCount > 0 ? ', ' : ''}{dirtyCount > 0 ? `${dirtyCount} Sucia` : ''}{cleanCount === 0 && dirtyCount === 0 ? 'Sin canastas' : ''}
+                  </div>
+                );
+              })()}
               <button 
                 className="btn-primary" 
                 onClick={() => onAction('show-scores-sheet')}
                 style={{ 
                   width: '100%', 
                   padding: '6px 12px', 
-                  fontSize: '0.75rem', 
+                  fontSize: '0.78rem', 
                   background: 'linear-gradient(135deg, #fbbf24 0%, #d97706 100%)', 
                   border: 'none', 
                   color: '#000',

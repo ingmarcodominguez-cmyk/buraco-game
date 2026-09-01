@@ -28,7 +28,7 @@ export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOppo
           return (
             <div 
               key={idx} 
-              className={`meld-row ${isSelected ? 'selected-target' : ''} ${isDragOver ? 'drag-over-target' : ''}`}
+              className={`meld-row ${isCanastra ? `meld-canasta ${canastraType}` : ''} ${isSelected ? 'selected-target' : ''} ${isDragOver ? 'drag-over-target' : ''}`}
               onClick={() => onMeldClick && !isOpponent && onMeldClick(idx)}
               style={{ cursor: (!isOpponent && onMeldClick) ? 'pointer' : 'default' }}
               onDragOver={(e) => {
@@ -55,7 +55,7 @@ export default function MeldArea({ melds, onMeldClick, selectedMeldIndex, isOppo
             >
               {isCanastra && (
                 <div className={`canastra-badge ${canastraType}`}>
-                  Canasta {canastraType === 'limpa' ? 'Limpia' : 'Sucia'}
+                  {canastraType === 'limpa' ? '👑 CANASTA LIMPIA' : '⭐ CANASTA SUCIA'} ({meld.length})
                 </div>
               )}
               
