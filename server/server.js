@@ -616,9 +616,9 @@ io.on('connection', (socket) => {
     gameState.players[teamIdx].melds.push(result.cards);
     gameState.lastAction = `${player.name} bajó juego: ${result.clean ? 'Limpio' : 'Sucio'} (${cards.length} cartas).`;
 
-    // Comprobar si toma muerto indirecto
-    const tookMortoIndirect = checkMortoIndirect(pIdx);
-    if (!tookMortoIndirect) {
+    // Comprobar si toma muerto directo
+    const tookMortoDirect = checkMortoDirect(pIdx);
+    if (!tookMortoDirect) {
       checkDirectBatida(pIdx);
     }
 
@@ -701,9 +701,9 @@ io.on('connection', (socket) => {
     teamPlayer.melds[meldIndex] = result.cards;
     gameState.lastAction = `${player.name} acopló cartas a su juego.`;
 
-    // Comprobar si toma muerto indirecto
-    const tookMortoIndirect = checkMortoIndirect(pIdx);
-    if (!tookMortoIndirect) {
+    // Comprobar si toma muerto directo
+    const tookMortoDirect = checkMortoDirect(pIdx);
+    if (!tookMortoDirect) {
       checkDirectBatida(pIdx);
     }
 
@@ -1194,8 +1194,16 @@ function checkMortoDirect(playerIdx) {
       }
       player.hasTakenMorto = true;
       gameState.lastAction += ` ¡${player.name} tomó el MUERTO DIRECTO!`;
+      gameState.mortoAlert = {
+        playerName: player.name,
+        isDirect: true,
+        playerIdx,
+        timestamp: Date.now()
+      };
+      return true;
     }
   }
+  return false;
 }
 
 // Comprueba si el jugador se quedó sin cartas tras el descarte y recibe el Muerto Indirecto (pasa turno)
@@ -1219,6 +1227,12 @@ function checkMortoIndirect(playerIdx) {
       }
       player.hasTakenMorto = true;
       gameState.lastAction += ` ¡${player.name} tomó el MUERTO INDIRECTO! Su turno termina.`;
+      gameState.mortoAlert = {
+        playerName: player.name,
+        isDirect: false,
+        playerIdx,
+        timestamp: Date.now()
+      };
       return true;
     }
   }
@@ -1771,8 +1785,8 @@ function performOneBotMeldAction(botIdx) {
         botHand.splice(cIdx, 1);
         gameState.lastAction = `${botPlayer.name} acopló ${card.rank} de ${card.suit} en mesa.`;
         
-        const tookMortoIndirect = checkMortoIndirect(botIdx);
-        if (!tookMortoIndirect) {
+        const tookMortoDirect = checkMortoDirect(botIdx);
+        if (!tookMortoDirect) {
           checkDirectBatida(botIdx);
         }
         return true;
@@ -2235,8 +2249,8 @@ function tryMeldBotRun(cardsToMeld, botIdx, hasMelded) {
     gameState.players[teamIdx].melds.push(result.cards);
     gameState.lastAction = `${botPlayer.name} bajó juego: ${result.clean ? 'Limpio' : 'Sucio'} (${cardsToMeld.length} cartas).`;
     
-    const tookMortoIndirect = checkMortoIndirect(botIdx);
-    if (!tookMortoIndirect) {
+    const tookMortoDirect = checkMortoDirect(botIdx);
+    if (!tookMortoDirect) {
       checkDirectBatida(botIdx);
     }
     return true;
