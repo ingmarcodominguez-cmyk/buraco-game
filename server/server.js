@@ -1599,10 +1599,8 @@ function simulateBotMelding(hand, existingMelds) {
           if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
 
           // Si el comodín puede unirse a cartas en mano para formar un juego nuevo (trío o escalera),
-          // no consumirlo en un acople simple de 1 carta (salvo que cree canasta o vacíe la mano)
-          const canCompleteCanastraNow = currentMeld.length === 6;
-          const canTakeMortoNow = tempHand.length === 1;
-          if (!canCompleteCanastraNow && !canTakeMortoNow && canWildcardFormNewMeldInHand(card, tempHand)) {
+          // no consumirlo en un acople simple de 1 carta
+          if (canWildcardFormNewMeldInHand(card, tempHand)) {
             continue;
           }
         }
@@ -1841,10 +1839,31 @@ function performOneBotMeldAction(botIdx) {
         if (isCurrentCleanCanastra) continue;
         if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
 
-        const canCompleteCanastraNow = currentMeld.length === 6;
-        const canTakeMortoNow = botHand.length === 1;
-        if (!canCompleteCanastraNow && !canTakeMortoNow && canWildcardFormNewMeldInHand(card, botHand)) {
-          continue; // Reservar el comodín para bajar el nuevo juego con las 2 cartas de la mano
+        // PRIORIDAD TÁCTICA DE COMODINES:
+        // Si el comodín puede formar un nuevo juego (trío o escalera) con 2 cartas de la mano:
+        // 1. Si la IA aún no tomó el muerto (!botHasMorto): ¡SIEMPRE RESERVARLO!
+        //    Bajar el trío/escalera elimina 3 cartas de la mano de golpe. Si le quedan 3 cartas (ej. dos 10 y un 2),
+        //    ¡Baja las 3 y toma el MUERTO DIRECTO inmediatamente, continuando su turno!
+        //    Acoplar el comodín para hacer una canasta sucia dejando cartas en mano es un error grave:
+        //    sin muerto no se puede ganar la partida.
+        // 2. Si ya tiene el muerto (botHasMorto):
+        //    Solo acoplar si completa canasta de 7 y no puede batir bajando el nuevo juego.
+        const canFormNewMeld = canWildcardFormNewMeldInHand(card, botHand);
+        if (canFormNewMeld) {
+          if (!botHasMorto) {
+            continue; // Prioridad suprema: ir al muerto con las cartas de la mano
+          }
+
+          const canBatWithNewMeld = botHand.length <= 4 && (canastrasCount >= requiredCanastras);
+          if (canBatWithNewMeld) {
+            continue; // Prioridad suprema: batir y ganar la mano
+          }
+
+          const canCompleteCanastraNow = currentMeld.length === 6;
+          const canWinWithAcople = botHand.length === 1 && (canastrasCount >= requiredCanastras || canCompleteCanastraNow);
+          if (!canCompleteCanastraNow && !canWinWithAcople) {
+            continue;
+          }
         }
       }
 
