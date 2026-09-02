@@ -38,8 +38,9 @@ export default function App() {
       if (inputPass === null) return;
       if (inputPass === 'lom@lind@') {
         sessionStorage.setItem('buraco_dev_auth', 'true');
+        localStorage.setItem('buraco_dev_mode', 'true');
         setIsDevAuthorized(true);
-        alert('✅ Modo Desarrollador activado. Herramientas disponibles.');
+        alert('✅ Modo Desarrollador activado. Las cartas de la IA ahora son visibles en tiempo real.');
       } else {
         alert('❌ Clave incorrecta. Permaneciendo en modo producción.');
       }
@@ -302,6 +303,7 @@ export default function App() {
           lobbyPlayers={lobbyPlayers}
           onAction={handleGameAction}
           isDevAuthorized={isDevAuthorized}
+          onToggleDevAuth={handleToggleDevAuth}
         />
       )}
     </div>

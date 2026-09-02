@@ -25,7 +25,7 @@ const getTeamOwnerIndex = (idx, is4Player) => {
   return idx === 0 || idx === 2 ? 0 : 1;
 };
 
-export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, isDevAuthorized }) {
+export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, isDevAuthorized, onToggleDevAuth }) {
   const [prevGameState, setPrevGameState] = useState(null);
   const [animatingDiscard, setAnimatingDiscard] = useState(null);
   const [newlyAddedCardIds, setNewlyAddedCardIds] = useState(new Set());
@@ -97,9 +97,16 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
   const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [activeTab, setActiveTab] = useState('detalle');
-  const [isDevMode, setIsDevMode] = useState(() => localStorage.getItem('buraco_dev_mode') === 'true');
+  const [isDevMode, setIsDevMode] = useState(() => localStorage.getItem('buraco_dev_mode') !== 'false');
   const [mortoBanner, setMortoBanner] = useState(null);
   const lastMortoAlertTimestampRef = useRef(0);
+
+  useEffect(() => {
+    if (isDevAuthorized) {
+      setIsDevMode(true);
+      localStorage.setItem('buraco_dev_mode', 'true');
+    }
+  }, [isDevAuthorized]);
 
   const renderSidebarSeat = (idx, posStyle) => {
     const player = gameState?.players?.[idx];
@@ -633,8 +640,31 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
               <span className="badge-info">
                 {opponentMortoTaken ? 'Muerto Tomado' : 'Muerto Pendiente'}
               </span>
-              {/* Botón rápido para activar/desactivar Modo Dev (solo visible si está autorizado con la clave) */}
-              {isDevAuthorized && (
+              {/* Botón rápido para activar Modo Dev directamente con la clave o alternar si ya está activo */}
+              {!isDevAuthorized ? (
+                <button
+                  type="button"
+                  onClick={onToggleDevAuth}
+                  style={{
+                    padding: '3px 9px',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: 'rgba(255,255,255,0.06)',
+                    border: '1px solid rgba(255,255,255,0.2)',
+                    color: '#94a3b8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s ease'
+                  }}
+                  title="Ingresar clave para ver las cartas de la IA"
+                >
+                  <span>🔒</span>
+                  <span>Ver IA</span>
+                </button>
+              ) : (
                 <button
                   type="button"
                   onClick={() => {
@@ -643,7 +673,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                     localStorage.setItem('buraco_dev_mode', next.toString());
                   }}
                   style={{
-                    padding: '3px 8px',
+                    padding: '3px 9px',
                     fontSize: '0.72rem',
                     fontWeight: 600,
                     borderRadius: '6px',
@@ -656,24 +686,30 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                     gap: '4px',
                     transition: 'all 0.2s ease'
                   }}
-                  title="Modo Desarrollo: Ver las cartas de la IA en tiempo real"
+                  title="Alternar visibilidad de las cartas de la IA"
                 >
                   <span>👁️</span>
-                  <span>{isDevMode ? 'Dev IA: ON' : 'Modo Dev'}</span>
+                  <span>{isDevMode ? 'Dev IA: ON' : 'Dev IA: OFF'}</span>
                 </button>
               )}
             </div>
           </div>
           
           {/* Si la ronda terminó, o si está autorizado y activo el Modo Desarrollo, mostrar la mano del oponente */}
-          {(gameState.status === 'finished' || (isDevAuthorized && isDevMode && opponent?.devHand && opponent.devHand.length > 0)) && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
-              {!is4P ? (
-                (() => {
-                  const rawCards = (gameState.status === 'finished' && opponent?.hand?.some(c => !c.isHidden))
-                    ? opponent.hand
-                    : (opponent?.devHand || []);
-                  if (!rawCards || rawCards.length === 0) return null;
+          {(() => {
+            const botPlayer = gameState?.players?.find(p => p && (p.isBot || (p.devHand && p.devHand.length > 0)));
+            const targetDevCards = (opponent?.devHand && opponent.devHand.length > 0) ? opponent.devHand : (botPlayer?.devHand || []);
+            const shouldShow = gameState.status === 'finished' || (isDevAuthorized && isDevMode && targetDevCards.length > 0);
+            if (!shouldShow) return null;
+
+            return (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
+                {!is4P ? (
+                  (() => {
+                    const rawCards = (gameState.status === 'finished' && opponent?.hand?.some(c => !c.isHidden))
+                      ? opponent.hand
+                      : targetDevCards;
+                    if (!rawCards || rawCards.length === 0) return null;
 
                   // Ordenar las cartas para visualización clara en modo dev
                   const rankOrderVals = { 'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'Joker': 14 };
@@ -773,7 +809,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                 })
               )}
             </div>
-          )}
+          );
+        })()}
           
           <MeldArea 
             melds={opponentMeldsList} 
