@@ -1840,34 +1840,45 @@ function performOneBotMeldAction(botIdx) {
   for (const rank of Object.keys(rankGroups)) {
     let groupCards = rankGroups[rank];
 
-    // REGLA TÁCTICA: En Buraco las escaleras son infinitamente superiores a los tríos.
-    // No romper un proyecto de escalera (o conexión con juego propio en mesa) para armar un trío,
-    // salvo que la carta esté repetida o que estemos a punto de ir al muerto (<= 4 cartas).
-    if (isAlreadyMelded && !canTakeMortoThisTurn && !isCloseToMorto) {
-      groupCards = groupCards.filter(card => {
-        // ¿Tiene duplicado en mano? Si tiene duplicado, una se puede usar sin problema
-        const hasDuplicate = botHand.filter(c => c.id !== card.id && c.suit === card.suit && c.rank === card.rank).length > 0;
-        if (hasDuplicate) return true;
+    // MODO VACIADO DEFENSIVO DE MANO:
+    // Si el rival ya tiene canasta y pocas cartas (<= 6), el peligro de corte es inminente.
+    // En esta situación de emergencia, ¡DESCARGA TOTAL! No se retiene nada: se bajan todos los grupos posibles
+    // para sumar puntos en mesa y evitar penalizaciones de decenas o cientos de puntos en mano.
+    const isRivalClosing = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 6;
 
-        // ¿Tiene vecino de escalera en la mano? (ej. tengo 7 y 8 del mismo palo)
-        const hasSeqNeighborInHand = botHand.some(c => c.id !== card.id && c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker' && Math.abs((rankOrder[c.rank] || 0) - (rankOrder[card.rank] || 0)) <= 2);
-        
-        // ¿Conecta directamente con una escalera propia ya bajada en mesa?
-        const connectsToTableMeld = botMelds.some(m => {
+    if (!isRivalClosing && isAlreadyMelded && !canTakeMortoThisTurn && !isCloseToMorto) {
+      // Solo en juego tranquilo: si una carta tiene vecino directo (distancia 1) del mismo palo en mano
+      // Y ese palo conecta directamente con una escalera ya bajada en mesa, preservarla para la escalera
+      // (siempre y cuando no esté repetida).
+      groupCards = groupCards.filter(card => {
+        const duplicateCount = botHand.filter(c => c.id !== card.id && c.suit === card.suit && c.rank === card.rank).length;
+        if (duplicateCount > 0) return true; // Si está repetida, se puede usar sin problema
+
+        const cardVal = rankOrder[card.rank] || 0;
+        // Vecino directo a distancia 1 (ej. 7 y 8 de trébol)
+        const hasDirectNeighborInHand = botHand.some(c => 
+          c.id !== card.id && 
+          c.suit === card.suit && 
+          c.rank !== '2' && 
+          c.rank !== 'Joker' && 
+          Math.abs((rankOrder[c.rank] || 0) - cardVal) === 1
+        );
+
+        // Conecta directamente con una escalera propia ya bajada en mesa de ese mismo palo
+        const connectsToTableRun = botMelds.some(m => {
           if (m.length > 0 && m[0].suit === card.suit) {
             const rankVals = m.map(mc => rankOrder[mc.representedRank || mc.rank]).filter(Boolean);
             if (rankVals.length > 0) {
               const minVal = Math.min(...rankVals);
               const maxVal = Math.max(...rankVals);
-              const cardVal = rankOrder[card.rank] || 0;
               return Math.abs(cardVal - minVal) <= 2 || Math.abs(cardVal - maxVal) <= 2;
             }
           }
           return false;
         });
 
-        // Si conecta con escalera en mano o en mesa y NO está repetida, preservarla para la escalera
-        if (hasSeqNeighborInHand || connectsToTableMeld) {
+        // Solo proteger si tiene vecino directo Y conecta con escalera en mesa
+        if (hasDirectNeighborInHand && connectsToTableRun) {
           return false;
         }
         return true;
