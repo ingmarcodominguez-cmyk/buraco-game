@@ -25,7 +25,7 @@ const getTeamOwnerIndex = (idx, is4Player) => {
   return idx === 0 || idx === 2 ? 0 : 1;
 };
 
-export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }) {
+export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, isDevAuthorized }) {
   const [prevGameState, setPrevGameState] = useState(null);
   const [animatingDiscard, setAnimatingDiscard] = useState(null);
   const [newlyAddedCardIds, setNewlyAddedCardIds] = useState(new Set());
@@ -620,38 +620,40 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               <span className="badge-info">
                 {opponentMortoTaken ? 'Muerto Tomado' : 'Muerto Pendiente'}
               </span>
-              {/* Botón rápido para activar/desactivar Modo Dev (ver cartas reales de la IA) */}
-              <button
-                type="button"
-                onClick={() => {
-                  const next = !isDevMode;
-                  setIsDevMode(next);
-                  localStorage.setItem('buraco_dev_mode', next.toString());
-                }}
-                style={{
-                  padding: '3px 8px',
-                  fontSize: '0.72rem',
-                  fontWeight: 600,
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  background: isDevMode ? 'rgba(14, 165, 233, 0.25)' : 'rgba(255,255,255,0.06)',
-                  border: `1px solid ${isDevMode ? '#38bdf8' : 'rgba(255,255,255,0.2)'}`,
-                  color: isDevMode ? '#38bdf8' : '#94a3b8',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                  transition: 'all 0.2s ease'
-                }}
-                title="Modo Desarrollo: Ver las cartas de la IA en tiempo real"
-              >
-                <span>👁️</span>
-                <span>{isDevMode ? 'Dev IA: ON' : 'Modo Dev'}</span>
-              </button>
+              {/* Botón rápido para activar/desactivar Modo Dev (solo visible si está autorizado con la clave) */}
+              {isDevAuthorized && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !isDevMode;
+                    setIsDevMode(next);
+                    localStorage.setItem('buraco_dev_mode', next.toString());
+                  }}
+                  style={{
+                    padding: '3px 8px',
+                    fontSize: '0.72rem',
+                    fontWeight: 600,
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    background: isDevMode ? 'rgba(14, 165, 233, 0.25)' : 'rgba(255,255,255,0.06)',
+                    border: `1px solid ${isDevMode ? '#38bdf8' : 'rgba(255,255,255,0.2)'}`,
+                    color: isDevMode ? '#38bdf8' : '#94a3b8',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.2s ease'
+                  }}
+                  title="Modo Desarrollo: Ver las cartas de la IA en tiempo real"
+                >
+                  <span>👁️</span>
+                  <span>{isDevMode ? 'Dev IA: ON' : 'Modo Dev'}</span>
+                </button>
+              )}
             </div>
           </div>
           
-          {/* Si la ronda terminó, o si está activo el Modo Desarrollo, mostrar la mano del oponente */}
-          {(gameState.status === 'finished' || (isDevMode && opponent?.devHand && opponent.devHand.length > 0)) && (
+          {/* Si la ronda terminó, o si está autorizado y activo el Modo Desarrollo, mostrar la mano del oponente */}
+          {(gameState.status === 'finished' || (isDevAuthorized && isDevMode && opponent?.devHand && opponent.devHand.length > 0)) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
               {!is4P ? (
                 (() => {
@@ -668,7 +670,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
                     return (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0);
                   });
 
-                  const isDevActive = gameState.status !== 'finished' && isDevMode;
+                  const isDevActive = gameState.status !== 'finished' && isDevAuthorized && isDevMode;
 
                   return (
                     <div style={{ 

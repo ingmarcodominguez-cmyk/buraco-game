@@ -24,6 +24,27 @@ export default function App() {
   const [joined, setJoined] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isDevAuthorized, setIsDevAuthorized] = useState(() => sessionStorage.getItem('buraco_dev_auth') === 'true');
+
+  const handleToggleDevAuth = () => {
+    if (isDevAuthorized) {
+      if (window.confirm('¿Deseas salir del Modo Desarrollador y volver al Modo Producción?')) {
+        sessionStorage.removeItem('buraco_dev_auth');
+        localStorage.removeItem('buraco_dev_mode');
+        setIsDevAuthorized(false);
+      }
+    } else {
+      const inputPass = window.prompt('Ingresa la clave de desarrollador para activar las herramientas de depuración:');
+      if (inputPass === null) return;
+      if (inputPass === 'lom@lind@') {
+        sessionStorage.setItem('buraco_dev_auth', 'true');
+        setIsDevAuthorized(true);
+        alert('✅ Modo Desarrollador activado. Herramientas disponibles.');
+      } else {
+        alert('❌ Clave incorrecta. Permaneciendo en modo producción.');
+      }
+    }
+  };
 
   useEffect(() => {
     const handleFullscreenChange = () => {
@@ -199,17 +220,38 @@ export default function App() {
               {isFullscreen ? 'Salir Completa' : 'Pantalla Completa'}
             </button>
             
+            {/* Acceso discreto para desarrollador: inicia por defecto bloqueado (producción) */}
+            <button 
+              className="btn-header" 
+              onClick={handleToggleDevAuth}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                opacity: isDevAuthorized ? 1 : 0.6,
+                background: isDevAuthorized ? 'rgba(14, 165, 233, 0.2)' : 'rgba(255,255,255,0.05)',
+                borderColor: isDevAuthorized ? '#38bdf8' : 'rgba(255,255,255,0.15)',
+                color: isDevAuthorized ? '#38bdf8' : '#94a3b8',
+                fontSize: '0.75rem',
+                padding: '4px 8px'
+              }}
+              title={isDevAuthorized ? "Modo Desarrollador Activo (Clic para volver a Producción)" : "Desbloquear herramientas de desarrollo"}
+            >
+              {isDevAuthorized ? '🔓 Dev: ON' : '🔒 Dev'}
+            </button>
+
             {joined && (
               <>
                 <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
                   Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
                 </span>
-                {gameState && gameState.status === 'playing' && (
+                {/* Simular corte: SOLO visible si el modo desarrollador está autorizado con la clave lom@lind@ */}
+                {isDevAuthorized && gameState && gameState.status === 'playing' && (
                   <button 
                     className="btn-header" 
                     onClick={() => {
                       if (window.confirm('¿Quieres simular que el jugador actual bate la ronda para probar la pantalla de corte?')) {
-                        socket.emit('debug-simulate-batida');
+                        socket.emit('debug-simulate-batida', { pass: 'lom@lind@' });
                       }
                     }}
                     style={{ 
@@ -259,6 +301,7 @@ export default function App() {
           playerIndex={playerIndex}
           lobbyPlayers={lobbyPlayers}
           onAction={handleGameAction}
+          isDevAuthorized={isDevAuthorized}
         />
       )}
     </div>

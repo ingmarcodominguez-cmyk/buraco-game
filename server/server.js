@@ -1003,8 +1003,13 @@ io.on('connection', (socket) => {
     }
   });
 
-  // Simular corte/batida instantáneo (para pruebas/depuración)
-  socket.on('debug-simulate-batida', () => {
+  // Simular corte/batida instantáneo (para pruebas/depuración - requiere clave)
+  socket.on('debug-simulate-batida', (payload) => {
+    const pass = typeof payload === 'string' ? payload : payload?.pass;
+    if (pass !== 'lom@lind@') {
+      socket.emit('error-message', 'Acceso denegado: clave de desarrollador incorrecta.');
+      return;
+    }
     if (!gameState || gameState.status !== 'playing') return;
 
     const pIdx = gameState.turn;
