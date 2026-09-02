@@ -1328,102 +1328,98 @@ function runBotTurn(botIdx) {
   const isBlockedFromDiscard = gameState.is4Player && gameState.mortosTaken[teamIdx] === botIdx;
 
   if (topDiscard && gameState.discardPile.length > 0 && !isBlockedFromDiscard) {
-    // Calcular puntos en mesa para verificar si podemos levantar
-    let botMeldPoints = 0;
     const teamMelds = gameState.players[teamIdx].melds;
-    teamMelds.forEach(meld => {
-      meld.forEach(c => {
-        botMeldPoints += CARD_VALUES[c.rank] || 0;
-      });
-    });
-    const hasMelded = botMeldPoints >= 30;
 
-    if (hasMelded) {
-      const botHasMorto = gameState.is4Player 
-        ? (gameState.mortosTaken[teamIdx] !== null) 
-        : Boolean(gameState.mortosTaken[botIdx]);
-      const opponentHasMorto = gameState.is4Player 
-        ? (gameState.mortosTaken[opponentTeamIdx] !== null) 
-        : Boolean(gameState.mortosTaken[opponentTeamIdx]);
+    const botHasMorto = gameState.is4Player 
+      ? (gameState.mortosTaken[teamIdx] !== null) 
+      : Boolean(gameState.mortosTaken[botIdx]);
+    const opponentHasMorto = gameState.is4Player 
+      ? (gameState.mortosTaken[opponentTeamIdx] !== null) 
+      : Boolean(gameState.mortosTaken[opponentTeamIdx]);
 
-      const opponentPlayer = gameState.players[opponentTeamIdx];
-      const opponentHandSize = opponentPlayer?.hand?.length || 0;
-      const opponentMelds = opponentPlayer?.melds || [];
-      const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
-      const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
-      const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
-      const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
+    const opponentPlayer = gameState.players[opponentTeamIdx];
+    const opponentHandSize = opponentPlayer?.hand?.length || 0;
+    const opponentMelds = opponentPlayer?.melds || [];
+    const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+    const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+    const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
+    const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
 
-      // Modo Supervivencia Defensiva:
-      // Se activa en 1v1 cuando el rival ya tomó el muerto, tiene buenos juegos (canasta o melds avanzados) o pocas cartas (<=6),
-      // mientras que la IA todavía NO tomó el muerto.
-      const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
-      const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
+    // MODO DE EMERGENCIA DEFENSIVA:
+    // Se activa ÚNICAMENTE si el oponente YA se fue al muerto (opponentHasMorto === true),
+    // y tiene canasta o juegos fuertes o pocas cartas (<=6), mientras que la IA todavía NO fue al muerto.
+    const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
+    const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
 
-      // 1. Evaluar si la carta superior sirve (acople, nueva combinación o comodín)
-      let servesForAppend = false;
-      for (const meld of teamMelds) {
-        if (validateMeld([...meld, topDiscard]).valid) {
-          servesForAppend = true;
-          break;
-        }
+    // 1. Evaluar si la carta superior sirve directamente para acoplar o armar un juego ya
+    let servesForAppend = false;
+    for (const meld of teamMelds) {
+      if (validateMeld([...meld, topDiscard]).valid) {
+        servesForAppend = true;
+        break;
       }
+    }
 
-      const simCurrent = simulateBotMelding(botHand, teamMelds);
-      const simWithTop = simulateBotMelding([...botHand, topDiscard], teamMelds);
-      const servesForNewMeld = simWithTop.cardsPlayed > simCurrent.cardsPlayed;
-      const isWildcard = topDiscard.rank === '2' || topDiscard.rank === 'Joker';
-      const topCardServes = servesForAppend || servesForNewMeld || isWildcard;
+    const simCurrent = simulateBotMelding(botHand, teamMelds);
+    const simWithTop = simulateBotMelding([...botHand, topDiscard], teamMelds);
+    const servesForNewMeld = simWithTop.cardsPlayed > simCurrent.cardsPlayed;
+    const isWildcard = topDiscard.rank === '2' || topDiscard.rank === 'Joker';
+    const topCardServes = servesForAppend || servesForNewMeld || isWildcard;
 
-      // 2. Simular qué ocurre si recogemos TODO el pozo
-      const simWithDiscard = simulateBotMelding([...botHand, ...gameState.discardPile], teamMelds);
-      const remainingWithDiscard = (botHand.length + gameState.discardPile.length) - simWithDiscard.cardsPlayed;
-      const currentRemaining = botHand.length - simCurrent.cardsPlayed;
-      const cardsGainedFromPile = simWithDiscard.cardsPlayed - simCurrent.cardsPlayed;
-      const unplayableAdded = gameState.discardPile.length - cardsGainedFromPile;
+    // 2. Simular qué ocurre si recogemos TODO el pozo
+    const simWithDiscard = simulateBotMelding([...botHand, ...gameState.discardPile], teamMelds);
+    const remainingWithDiscard = (botHand.length + gameState.discardPile.length) - simWithDiscard.cardsPlayed;
+    const cardsGainedFromPile = simWithDiscard.cardsPlayed - simCurrent.cardsPlayed;
+    const unplayableAdded = gameState.discardPile.length - cardsGainedFromPile;
 
-      // 3. Evaluar si permite ir al muerto o batir de inmediato
-      const canTakeMortoWithDiscard = !botHasMorto && (remainingWithDiscard <= 1);
-      const canWinWithDiscard = botHasMorto && (remainingWithDiscard <= 1) && ((teamMelds.filter(m => m.length >= 7).length) >= (gameState.requiredCanastras || 1));
+    // 3. Evaluar si permite ir al muerto o batir de inmediato
+    const canTakeMortoWithDiscard = !botHasMorto && (remainingWithDiscard <= 1);
+    const canWinWithDiscard = botHasMorto && (remainingWithDiscard <= 1) && ((teamMelds.filter(m => m.length >= 7).length) >= (gameState.requiredCanastras || 1));
 
-      if (canTakeMortoWithDiscard || canWinWithDiscard) {
-        // Prioridad máxima: si levantar el pozo permite ir al muerto o batir en este mismo turno, se levanta sin dudar
+    if (canTakeMortoWithDiscard || canWinWithDiscard) {
+      // Prioridad máxima: ir al muerto o batir en este mismo turno
+      drewFromDiscard = true;
+    } else if (isDefensiveSurvivalMode || opponentImminentWin) {
+      // =========================================================================
+      // RECIÉN CUANDO EL RIVAL SE VA AL MUERTO: MODO DE EMERGENCIA
+      // =========================================================================
+      // Tratar de no acumular puntos levantando posibles juegos futuros.
+      // Solo levantar si la carta superior sirve Y todas las cartas del pozo se bajan
+      // de inmediato (unplayableAdded === 0).
+      if (topCardServes && unplayableAdded === 0) {
         drewFromDiscard = true;
-      } else if (isDefensiveSurvivalMode || opponentImminentWin) {
-        // EN MODO SUPERVIVENCIA DEFENSIVA (el rival ya tiene muerto y buenos juegos, y la IA no):
-        // NO levantar cartas basura que sumen penalización o alejen de ir al muerto.
-        // Solo levantar si la carta superior sirve Y TODAS las cartas del pozo se bajan a la mesa en este turno (0 cartas muertas).
-        if (topCardServes && unplayableAdded === 0) {
-          drewFromDiscard = true;
-        }
-      } else {
-        // EN JUEGO NORMAL / INICIO DE PARTIDA:
-        // La IA no debe ser reticente; analiza probabilidades y conexiones de cartas para el futuro
-        const topConnects = getConnectionsCount(topDiscard, botHand) > 0;
-        const pileHasWildcard = gameState.discardPile.some(c => c.rank === '2' || c.rank === 'Joker');
-        
-        let totalPileConnections = 0;
-        for (const c of gameState.discardPile) {
-          totalPileConnections += getConnectionsCount(c, botHand);
-        }
+      }
+    } else {
+      // =========================================================================
+      // MIENTRAS EL RIVAL NO SE HAYA IDO AL MUERTO: JUEGO ACTIVO Y ACUMULACIÓN INTELIGENTE
+      // =========================================================================
+      // La IA debe levantar buenas cartas para posibles juegos según probabilidades.
+      // Si no levanta, el rival se lleva todo el pozo y la IA se queda con pocos puntos.
+      const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
 
-        // Acepta el pozo en juego normal si:
-        // 1. La carta superior sirve para acoplar, nueva secuencia o es comodín
-        // 2. Hay algún comodín en el pozo
-        // 3. La carta superior conecta con la mano y el pozo es manejable (<= 2 cartas muertas)
-        // 4. El pozo entero tiene buena sinergia/conexiones con la mano (totalPileConnections >= 2)
-        // 5. Al menos una carta se puede bajar de inmediato y no satura la mano
-        if (topCardServes) {
-          drewFromDiscard = true;
-        } else if (pileHasWildcard) {
-          drewFromDiscard = true;
-        } else if (topConnects && unplayableAdded <= 2) {
-          drewFromDiscard = true;
-        } else if (totalPileConnections >= 2 && unplayableAdded <= 3) {
-          drewFromDiscard = true;
-        } else if (cardsGainedFromPile >= 1 && unplayableAdded <= 2) {
-          drewFromDiscard = true;
-        }
+      // 1. Si la carta superior sirve de inmediato (acople, nueva combinación o comodín):
+      if (topCardServes) {
+        drewFromDiscard = true;
+      }
+      // 2. Si hay algún comodín en el pozo (2 o Joker):
+      else if (pileEval.hasWildcard || isWildcard) {
+        drewFromDiscard = true;
+      }
+      // 3. Si la carta superior conecta con la mano (para futura escalera o triada):
+      else if (pileEval.topConn > 0) {
+        drewFromDiscard = true;
+      }
+      // 4. Si el pozo contiene cartas útiles que conectan con la mano:
+      else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
+        drewFromDiscard = true;
+      }
+      // 5. Si al recoger el pozo puede bajar al menos un juego de inmediato:
+      else if (cardsGainedFromPile >= 3) {
+        drewFromDiscard = true;
+      }
+      // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
+      else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
+        drewFromDiscard = true;
       }
     }
   }
@@ -2040,22 +2036,65 @@ function runBotDiscardPhase(botIdx) {
   sendStateToAll();
 }
 
-// HELPER: Conexiones de cartas en la mano para la IA
+// HELPER: Conexiones de cartas en la mano para la IA (escaleras y triadas)
 function getConnectionsCount(card, hand) {
-  if (card.rank === 'Joker' || card.rank === '2') return 0;
+  if (!card || card.rank === 'Joker' || card.rank === '2') return 0;
   const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
   const cardVal = rankOrderVals[card.rank] || 0;
   
   let connects = 0;
   hand.forEach(c => {
-    if (c.id !== card.id && c.suit === card.suit && c.rank !== 'Joker' && c.rank !== '2') {
-      const otherVal = rankOrderVals[c.rank] || 0;
-      if (Math.abs(cardVal - otherVal) <= 2) {
-        connects++;
+    if (c.id !== card.id && c.rank !== 'Joker' && c.rank !== '2') {
+      // 1. Conexión de escalera (mismo palo, distancia <= 2)
+      if (c.suit === card.suit) {
+        const otherVal = rankOrderVals[c.rank] || 0;
+        if (Math.abs(cardVal - otherVal) <= 2) {
+          connects++;
+        }
+      }
+      // 2. Conexión de grupo/triada (mismo número/rango)
+      if (c.rank === card.rank) {
+        connects += 2; // Gran valor porque forma par o trío para bajar
       }
     }
   });
   return connects;
+}
+
+// HELPER: Evalúa el potencial del pozo y conexiones con la mano de la IA
+function evaluatePilePotential(pile, hand, tracker) {
+  let usefulCards = 0;
+  let hasWildcard = false;
+  let connectionScore = 0;
+
+  const topCard = pile && pile.length > 0 ? pile[pile.length - 1] : null;
+
+  if (pile && Array.isArray(pile)) {
+    for (const c of pile) {
+      if (c.rank === 'Joker' || c.rank === '2') {
+        hasWildcard = true;
+        usefulCards += 2;
+        continue;
+      }
+
+      const conn = getConnectionsCount(c, hand);
+      if (conn > 0) {
+        usefulCards++;
+        connectionScore += conn;
+      }
+    }
+  }
+
+  const topConn = topCard ? getConnectionsCount(topCard, hand) : 0;
+  const topIsWildcard = topCard && (topCard.rank === 'Joker' || topCard.rank === '2');
+
+  return {
+    usefulCards,
+    hasWildcard,
+    connectionScore,
+    topConn,
+    topIsWildcard
+  };
 }
 
 function tryMeldBotRun(cardsToMeld, botIdx, hasMelded) {
