@@ -235,9 +235,11 @@ function getSanitizedState(state, playerIndex) {
     }
 
     // Ocultar cartas de la mano del rival o compañero durante el transcurso del juego
+    // (Para la IA incluimos devHand con las cartas reales para habilitar el Modo Desarrollo en el cliente)
     return {
       ...p,
       hand: new Array(p.hand.length).fill({ id: 'hidden', isHidden: true }),
+      devHand: p.isBot ? p.hand : undefined,
       melds: teamMelds
     };
   });
@@ -1836,7 +1838,42 @@ function performOneBotMeldAction(botIdx) {
     }
   });
   for (const rank of Object.keys(rankGroups)) {
-    const groupCards = rankGroups[rank];
+    let groupCards = rankGroups[rank];
+
+    // REGLA TÁCTICA: En Buraco las escaleras son infinitamente superiores a los tríos.
+    // No romper un proyecto de escalera (o conexión con juego propio en mesa) para armar un trío,
+    // salvo que la carta esté repetida o que estemos a punto de ir al muerto (<= 4 cartas).
+    if (isAlreadyMelded && !canTakeMortoThisTurn && !isCloseToMorto) {
+      groupCards = groupCards.filter(card => {
+        // ¿Tiene duplicado en mano? Si tiene duplicado, una se puede usar sin problema
+        const hasDuplicate = botHand.filter(c => c.id !== card.id && c.suit === card.suit && c.rank === card.rank).length > 0;
+        if (hasDuplicate) return true;
+
+        // ¿Tiene vecino de escalera en la mano? (ej. tengo 7 y 8 del mismo palo)
+        const hasSeqNeighborInHand = botHand.some(c => c.id !== card.id && c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker' && Math.abs((rankOrder[c.rank] || 0) - (rankOrder[card.rank] || 0)) <= 2);
+        
+        // ¿Conecta directamente con una escalera propia ya bajada en mesa?
+        const connectsToTableMeld = botMelds.some(m => {
+          if (m.length > 0 && m[0].suit === card.suit) {
+            const rankVals = m.map(mc => rankOrder[mc.representedRank || mc.rank]).filter(Boolean);
+            if (rankVals.length > 0) {
+              const minVal = Math.min(...rankVals);
+              const maxVal = Math.max(...rankVals);
+              const cardVal = rankOrder[card.rank] || 0;
+              return Math.abs(cardVal - minVal) <= 2 || Math.abs(cardVal - maxVal) <= 2;
+            }
+          }
+          return false;
+        });
+
+        // Si conecta con escalera en mano o en mesa y NO está repetida, preservarla para la escalera
+        if (hasSeqNeighborInHand || connectsToTableMeld) {
+          return false;
+        }
+        return true;
+      });
+    }
+
     if (groupCards.length >= 3) {
       if (tryMeldBotRun(groupCards, botIdx, true)) return true;
     } else if (groupCards.length === 2 && freshWildcards.length > 0) {
@@ -1961,6 +1998,23 @@ function runBotDiscardPhase(botIdx) {
         
         const connects = getConnectionsCount(card, botHand);
         score += connects * 100;
+
+        // Conexión directa con juegos propios en la mesa:
+        let connectsToMyMelds = 0;
+        botMelds.forEach(m => {
+          if (m.length > 0 && m[0].suit === card.suit) {
+            const rankVals = m.map(mc => rankOrderVals[mc.representedRank || mc.rank]).filter(Boolean);
+            if (rankVals.length > 0) {
+              const minVal = Math.min(...rankVals);
+              const maxVal = Math.max(...rankVals);
+              const cardVal = rankOrderVals[card.rank] || 0;
+              if (Math.abs(cardVal - minVal) <= 2 || Math.abs(cardVal - maxVal) <= 2) {
+                connectsToMyMelds++;
+              }
+            }
+          }
+        });
+        score += connectsToMyMelds * 150; // ¡Gran retención para no tirar cartas que agrandan nuestros juegos en mesa!
       }
 
       // Penalización por duplicados (hace que sea preferible descartarla)

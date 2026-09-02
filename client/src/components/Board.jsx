@@ -97,6 +97,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
   const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [activeTab, setActiveTab] = useState('detalle');
+  const [isDevMode, setIsDevMode] = useState(() => localStorage.getItem('buraco_dev_mode') === 'true');
 
   const renderSidebarSeat = (idx, posStyle) => {
     const player = gameState?.players?.[idx];
@@ -522,7 +523,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
             <span style={{ fontWeight: 700, color: '#f8fafc' }}>
               {opponentNameText}
             </span>
-            <div style={{ display: 'flex', gap: '8px' }}>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               {!is4P && (
                 <span className={`badge-info ${!isMyTurn ? 'active-turn-badge' : ''}`}>
                   {!isMyTurn ? 'Su Turno' : 'Esperando'}
@@ -536,45 +537,105 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers }
               <span className="badge-info">
                 {opponentMortoTaken ? 'Muerto Tomado' : 'Muerto Pendiente'}
               </span>
+              {/* Botón rápido para activar/desactivar Modo Dev (ver cartas reales de la IA) */}
+              <button
+                type="button"
+                onClick={() => {
+                  const next = !isDevMode;
+                  setIsDevMode(next);
+                  localStorage.setItem('buraco_dev_mode', next.toString());
+                }}
+                style={{
+                  padding: '3px 8px',
+                  fontSize: '0.72rem',
+                  fontWeight: 600,
+                  borderRadius: '6px',
+                  cursor: 'pointer',
+                  background: isDevMode ? 'rgba(14, 165, 233, 0.25)' : 'rgba(255,255,255,0.06)',
+                  border: `1px solid ${isDevMode ? '#38bdf8' : 'rgba(255,255,255,0.2)'}`,
+                  color: isDevMode ? '#38bdf8' : '#94a3b8',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  transition: 'all 0.2s ease'
+                }}
+                title="Modo Desarrollo: Ver las cartas de la IA en tiempo real"
+              >
+                <span>👁️</span>
+                <span>{isDevMode ? 'Dev IA: ON' : 'Modo Dev'}</span>
+              </button>
             </div>
           </div>
           
-          {/* Si la ronda terminó, mostrar la mano del oponente */}
-          {gameState.status === 'finished' && (
+          {/* Si la ronda terminó, o si está activo el Modo Desarrollo, mostrar la mano del oponente */}
+          {(gameState.status === 'finished' || (isDevMode && opponent?.devHand && opponent.devHand.length > 0)) && (
             <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '6px' }}>
               {!is4P ? (
-                opponent?.hand && opponent.hand.length > 0 && (
-                  <div style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '6px', 
-                    padding: '6px 10px', 
-                    background: 'rgba(239, 68, 68, 0.1)', 
-                    borderRadius: '8px', 
-                    border: '1px dashed rgba(239, 68, 68, 0.3)',
-                    justifyContent: 'center'
-                  }}>
-                    <span style={{ fontSize: '0.8rem', color: '#f87171', fontWeight: 'bold', marginRight: '6px' }}>
-                      Mano de {opponent.name}:
-                    </span>
-                    <div style={{ display: 'flex', overflowX: 'auto', padding: '2px' }}>
-                      {opponent.hand.map((card, idx) => (
-                        <div 
-                          key={card.id || idx}
-                          style={{ 
-                            marginLeft: idx === 0 ? '0px' : '-44px',
-                            transform: 'scale(0.8)',
-                            transformOrigin: 'left center',
-                            boxShadow: '1px 0 4px rgba(0,0,0,0.3)',
-                            zIndex: idx
-                          }}
-                        >
-                          <Card card={card} isHidden={false} />
-                        </div>
-                      ))}
+                (() => {
+                  const rawCards = (gameState.status === 'finished' && opponent?.hand?.some(c => !c.isHidden))
+                    ? opponent.hand
+                    : (opponent?.devHand || []);
+                  if (!rawCards || rawCards.length === 0) return null;
+
+                  // Ordenar las cartas para visualización clara en modo dev
+                  const rankOrderVals = { 'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13, 'Joker': 14 };
+                  const suitOrderVals = { 'H': 1, 'D': 2, 'C': 3, 'S': 4, 'Joker': 5 };
+                  const displayCards = [...rawCards].sort((a, b) => {
+                    if (a.suit !== b.suit) return (suitOrderVals[a.suit] || 0) - (suitOrderVals[b.suit] || 0);
+                    return (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0);
+                  });
+
+                  const isDevActive = gameState.status !== 'finished' && isDevMode;
+
+                  return (
+                    <div style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '8px', 
+                      padding: '6px 12px', 
+                      background: isDevActive ? 'rgba(14, 165, 233, 0.12)' : 'rgba(239, 68, 68, 0.1)', 
+                      borderRadius: '8px', 
+                      border: isDevActive ? '1px solid rgba(56, 189, 248, 0.4)' : '1px dashed rgba(239, 68, 68, 0.3)',
+                      justifyContent: 'center',
+                      boxShadow: isDevActive ? '0 0 12px rgba(14, 165, 233, 0.15)' : 'none'
+                    }}>
+                      <span style={{ 
+                        fontSize: '0.8rem', 
+                        color: isDevActive ? '#38bdf8' : '#f87171', 
+                        fontWeight: 'bold', 
+                        marginRight: '6px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px'
+                      }}>
+                        {isDevActive ? (
+                          <>
+                            <span>🛠️</span>
+                            <span>Mano IA ({displayCards.length}):</span>
+                          </>
+                        ) : (
+                          `Mano de ${opponent.name}:`
+                        )}
+                      </span>
+                      <div style={{ display: 'flex', overflowX: 'auto', padding: '4px 2px' }}>
+                        {displayCards.map((card, idx) => (
+                          <div 
+                            key={card.id || idx}
+                            style={{ 
+                              marginLeft: idx === 0 ? '0px' : '-44px',
+                              transform: 'scale(0.82)',
+                              transformOrigin: 'left center',
+                              boxShadow: '1px 0 6px rgba(0,0,0,0.4)',
+                              zIndex: idx
+                            }}
+                          >
+                            <Card card={card} isHidden={false} />
+                          </div>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )
+                  );
+                })()
               ) : (
                 [leftOppIndex, rightOppIndex].map(oppIdx => {
                   const oppPlayer = gameState.players[oppIdx];
