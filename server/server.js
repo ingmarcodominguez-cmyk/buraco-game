@@ -1159,10 +1159,11 @@ function checkDirectBatida(pIdx) {
   const requiredCanastras = gameState.requiredCanastras || 1;
 
   if (hand.length === 0 && hasTakenMorto && canastrasCount >= requiredCanastras) {
-    gameState.status = 'finished';
+    gameState.status = 'finished-visual';
     gameState.winner = pIdx;
-    gameState.turnState = 'confirm-scores';
-    gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido directamente sin descarte! Fin de la ronda. Esperando confirmación de puntos.`;
+    gameState.cutterIndex = pIdx;
+    gameState.turnState = 'match-over-visual';
+    gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido la mano!`;
     gameState.roundScores = calculateRoundScores(gameState);
     return true;
   }

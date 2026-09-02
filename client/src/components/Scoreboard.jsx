@@ -51,7 +51,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
     let goOutBonus = 0;
     let roundTotal = meldPoints + cleanCanastraPoints + dirtyCanastraPoints;
     
-    if (gameState.status === 'finished') {
+    if (gameState.status === 'finished' || gameState.status === 'finished-visual') {
       playersInTeam.forEach(pIdx => {
         const pObj = gameState.players?.[pIdx];
         if (pObj && pObj.hand) {
@@ -155,7 +155,7 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
               +{oppBreakdown.dirtyCanastraPoints} <span style={{ fontSize: '0.75rem', color: '#94a3b8' }}>({oppBreakdown.dirtyCanastras})</span>
             </td>
           </tr>
-          {gameState.status === 'finished' && (
+          {(gameState.status === 'finished' || gameState.status === 'finished-visual') && (
             <>
               <tr>
                 <td>Sin Muerto</td>
@@ -180,13 +180,13 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
           )}
           <tr style={{ borderTop: '1px solid var(--glass-border)', background: 'rgba(255,255,255,0.02)' }}>
             <td style={{ fontWeight: '600' }}>
-              {gameState.status === 'finished' ? 'Total Ronda' : 'Total en Mesa'}
+              {(gameState.status === 'finished' || gameState.status === 'finished-visual') ? 'Total Ronda' : 'Total en Mesa'}
             </td>
             <td style={{ fontWeight: '600', color: myBreakdown.roundTotal >= 0 ? '#34d399' : '#ef4444' }}>
               {myBreakdown.roundTotal}
             </td>
             <td style={{ fontWeight: '600', color: oppBreakdown.roundTotal >= 0 ? '#34d399' : '#ef4444' }}>
-              {gameState.status === 'finished' ? oppBreakdown.roundTotal : oppBreakdown.roundTotal}
+              {oppBreakdown.roundTotal}
             </td>
           </tr>
           <tr className="score-row-total" style={{ borderTop: '2.5px double var(--glass-border)' }}>

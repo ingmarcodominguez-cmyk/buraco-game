@@ -392,7 +392,7 @@ function calculateRoundScores(gameState) {
     }
 
     // 4. Bono por batida (ir al final de la ronda)
-    if (gameState.status === 'finished' && gameState.winner !== null) {
+    if ((gameState.status === 'finished' || gameState.status === 'finished-visual') && gameState.winner !== null) {
       const winnerTeam = is4P ? (gameState.winner === 0 || gameState.winner === 2 ? 0 : 1) : gameState.winner;
       if (winnerTeam === t) {
         score += 100;
