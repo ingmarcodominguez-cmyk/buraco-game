@@ -1330,96 +1330,107 @@ function runBotTurn(botIdx) {
   if (topDiscard && gameState.discardPile.length > 0 && !isBlockedFromDiscard) {
     const teamMelds = gameState.players[teamIdx].melds;
 
-    const botHasMorto = gameState.is4Player 
-      ? (gameState.mortosTaken[teamIdx] !== null) 
-      : Boolean(gameState.mortosTaken[botIdx]);
-    const opponentHasMorto = gameState.is4Player 
-      ? (gameState.mortosTaken[opponentTeamIdx] !== null) 
-      : Boolean(gameState.mortosTaken[opponentTeamIdx]);
+    // REGLA ESTRICTA: Para tomar el pozo SI O SI debe haber bajado al menos 30 puntos
+    let totalMeldPoints = 0;
+    teamMelds.forEach(meld => {
+      meld.forEach(c => {
+        totalMeldPoints += CARD_VALUES[c.rank] || 0;
+      });
+    });
+    const hasMelded = totalMeldPoints >= 30;
 
-    const opponentPlayer = gameState.players[opponentTeamIdx];
-    const opponentHandSize = opponentPlayer?.hand?.length || 0;
-    const opponentMelds = opponentPlayer?.melds || [];
-    const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
-    const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
-    const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
-    const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
+    if (hasMelded) {
+      const botHasMorto = gameState.is4Player 
+        ? (gameState.mortosTaken[teamIdx] !== null) 
+        : Boolean(gameState.mortosTaken[botIdx]);
+      const opponentHasMorto = gameState.is4Player 
+        ? (gameState.mortosTaken[opponentTeamIdx] !== null) 
+        : Boolean(gameState.mortosTaken[opponentTeamIdx]);
 
-    // MODO DE EMERGENCIA DEFENSIVA:
-    // Se activa ÚNICAMENTE si el oponente YA se fue al muerto (opponentHasMorto === true),
-    // y tiene canasta o juegos fuertes o pocas cartas (<=6), mientras que la IA todavía NO fue al muerto.
-    const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
-    const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
+      const opponentPlayer = gameState.players[opponentTeamIdx];
+      const opponentHandSize = opponentPlayer?.hand?.length || 0;
+      const opponentMelds = opponentPlayer?.melds || [];
+      const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
+      const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
+      const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
+      const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
 
-    // 1. Evaluar si la carta superior sirve directamente para acoplar o armar un juego ya
-    let servesForAppend = false;
-    for (const meld of teamMelds) {
-      if (validateMeld([...meld, topDiscard]).valid) {
-        servesForAppend = true;
-        break;
+      // MODO DE EMERGENCIA DEFENSIVA:
+      // Se activa ÚNICAMENTE si el oponente YA se fue al muerto (opponentHasMorto === true),
+      // y tiene canasta o juegos fuertes o pocas cartas (<=6), mientras que la IA todavía NO fue al muerto.
+      const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
+      const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
+
+      // 1. Evaluar si la carta superior sirve directamente para acoplar o armar un juego ya
+      let servesForAppend = false;
+      for (const meld of teamMelds) {
+        if (validateMeld([...meld, topDiscard]).valid) {
+          servesForAppend = true;
+          break;
+        }
       }
-    }
 
-    const simCurrent = simulateBotMelding(botHand, teamMelds);
-    const simWithTop = simulateBotMelding([...botHand, topDiscard], teamMelds);
-    const servesForNewMeld = simWithTop.cardsPlayed > simCurrent.cardsPlayed;
-    const isWildcard = topDiscard.rank === '2' || topDiscard.rank === 'Joker';
-    const topCardServes = servesForAppend || servesForNewMeld || isWildcard;
+      const simCurrent = simulateBotMelding(botHand, teamMelds);
+      const simWithTop = simulateBotMelding([...botHand, topDiscard], teamMelds);
+      const servesForNewMeld = simWithTop.cardsPlayed > simCurrent.cardsPlayed;
+      const isWildcard = topDiscard.rank === '2' || topDiscard.rank === 'Joker';
+      const topCardServes = servesForAppend || servesForNewMeld || isWildcard;
 
-    // 2. Simular qué ocurre si recogemos TODO el pozo
-    const simWithDiscard = simulateBotMelding([...botHand, ...gameState.discardPile], teamMelds);
-    const remainingWithDiscard = (botHand.length + gameState.discardPile.length) - simWithDiscard.cardsPlayed;
-    const cardsGainedFromPile = simWithDiscard.cardsPlayed - simCurrent.cardsPlayed;
-    const unplayableAdded = gameState.discardPile.length - cardsGainedFromPile;
+      // 2. Simular qué ocurre si recogemos TODO el pozo
+      const simWithDiscard = simulateBotMelding([...botHand, ...gameState.discardPile], teamMelds);
+      const remainingWithDiscard = (botHand.length + gameState.discardPile.length) - simWithDiscard.cardsPlayed;
+      const cardsGainedFromPile = simWithDiscard.cardsPlayed - simCurrent.cardsPlayed;
+      const unplayableAdded = gameState.discardPile.length - cardsGainedFromPile;
 
-    // 3. Evaluar si permite ir al muerto o batir de inmediato
-    const canTakeMortoWithDiscard = !botHasMorto && (remainingWithDiscard <= 1);
-    const canWinWithDiscard = botHasMorto && (remainingWithDiscard <= 1) && ((teamMelds.filter(m => m.length >= 7).length) >= (gameState.requiredCanastras || 1));
+      // 3. Evaluar si permite ir al muerto o batir de inmediato
+      const canTakeMortoWithDiscard = !botHasMorto && (remainingWithDiscard <= 1);
+      const canWinWithDiscard = botHasMorto && (remainingWithDiscard <= 1) && ((teamMelds.filter(m => m.length >= 7).length) >= (gameState.requiredCanastras || 1));
 
-    if (canTakeMortoWithDiscard || canWinWithDiscard) {
-      // Prioridad máxima: ir al muerto o batir en este mismo turno
-      drewFromDiscard = true;
-    } else if (isDefensiveSurvivalMode || opponentImminentWin) {
-      // =========================================================================
-      // RECIÉN CUANDO EL RIVAL SE VA AL MUERTO: MODO DE EMERGENCIA
-      // =========================================================================
-      // Tratar de no acumular puntos levantando posibles juegos futuros.
-      // Solo levantar si la carta superior sirve Y todas las cartas del pozo se bajan
-      // de inmediato (unplayableAdded === 0).
-      if (topCardServes && unplayableAdded === 0) {
+      if (canTakeMortoWithDiscard || canWinWithDiscard) {
+        // Prioridad máxima: ir al muerto o batir en este mismo turno
         drewFromDiscard = true;
-      }
-    } else {
-      // =========================================================================
-      // MIENTRAS EL RIVAL NO SE HAYA IDO AL MUERTO: JUEGO ACTIVO Y ACUMULACIÓN INTELIGENTE
-      // =========================================================================
-      // La IA debe levantar buenas cartas para posibles juegos según probabilidades.
-      // Si no levanta, el rival se lleva todo el pozo y la IA se queda con pocos puntos.
-      const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
+      } else if (isDefensiveSurvivalMode || opponentImminentWin) {
+        // =========================================================================
+        // RECIÉN CUANDO EL RIVAL SE VA AL MUERTO: MODO DE EMERGENCIA
+        // =========================================================================
+        // Tratar de no acumular puntos levantando posibles juegos futuros.
+        // Solo levantar si la carta superior sirve Y todas las cartas del pozo se bajan
+        // de inmediato (unplayableAdded === 0).
+        if (topCardServes && unplayableAdded === 0) {
+          drewFromDiscard = true;
+        }
+      } else {
+        // =========================================================================
+        // MIENTRAS EL RIVAL NO SE HAYA IDO AL MUERTO: JUEGO ACTIVO Y ACUMULACIÓN INTELIGENTE
+        // =========================================================================
+        // Ya teniendo 30 puntos bajados, la IA compite activamente por el pozo según probabilidades.
+        // Si no levanta, el rival se lleva todo el pozo y la IA se queda con pocos puntos.
+        const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
 
-      // 1. Si la carta superior sirve de inmediato (acople, nueva combinación o comodín):
-      if (topCardServes) {
-        drewFromDiscard = true;
-      }
-      // 2. Si hay algún comodín en el pozo (2 o Joker):
-      else if (pileEval.hasWildcard || isWildcard) {
-        drewFromDiscard = true;
-      }
-      // 3. Si la carta superior conecta con la mano (para futura escalera o triada):
-      else if (pileEval.topConn > 0) {
-        drewFromDiscard = true;
-      }
-      // 4. Si el pozo contiene cartas útiles que conectan con la mano:
-      else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
-        drewFromDiscard = true;
-      }
-      // 5. Si al recoger el pozo puede bajar al menos un juego de inmediato:
-      else if (cardsGainedFromPile >= 3) {
-        drewFromDiscard = true;
-      }
-      // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
-      else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
-        drewFromDiscard = true;
+        // 1. Si la carta superior sirve de inmediato (acople, nueva combinación o comodín):
+        if (topCardServes) {
+          drewFromDiscard = true;
+        }
+        // 2. Si hay algún comodín en el pozo (2 o Joker):
+        else if (pileEval.hasWildcard || isWildcard) {
+          drewFromDiscard = true;
+        }
+        // 3. Si la carta superior conecta con la mano (para futura escalera o triada):
+        else if (pileEval.topConn > 0) {
+          drewFromDiscard = true;
+        }
+        // 4. Si el pozo contiene cartas útiles que conectan con la mano:
+        else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
+          drewFromDiscard = true;
+        }
+        // 5. Si al recoger el pozo puede bajar al menos un juego de inmediato:
+        else if (cardsGainedFromPile >= 3) {
+          drewFromDiscard = true;
+        }
+        // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
+        else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
+          drewFromDiscard = true;
+        }
       }
     }
   }
