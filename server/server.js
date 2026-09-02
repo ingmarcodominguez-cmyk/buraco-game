@@ -1533,6 +1533,51 @@ function runBotTurn(botIdx) {
   }, 1500);
 }
 
+// HELPER: Comprueba si un comodín (2 o Joker) puede formar un juego nuevo (trío o escalera) con cartas de la mano
+function canWildcardFormNewMeldInHand(wildcard, hand) {
+  if (!wildcard || (wildcard.rank !== '2' && wildcard.rank !== 'Joker')) return false;
+
+  // 1. ¿Puede formar un nuevo grupo (trío de mismo número)?
+  const rankGroups = {};
+  hand.forEach(c => {
+    if (c.id !== wildcard.id && c.rank !== '2' && c.rank !== 'Joker') {
+      if (!rankGroups[c.rank]) rankGroups[c.rank] = [];
+      rankGroups[c.rank].push(c);
+    }
+  });
+
+  for (const rank of Object.keys(rankGroups)) {
+    if (rankGroups[rank].length >= 2) {
+      const candidate = [rankGroups[rank][0], rankGroups[rank][1], wildcard];
+      if (validateMeld(candidate).valid) {
+        return true;
+      }
+    }
+  }
+
+  // 2. ¿Puede formar una nueva escalera (secuencia del mismo palo)?
+  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+  const suits = ['H', 'D', 'C', 'S'];
+  for (let s of suits) {
+    let suitCards = hand.filter(c => c.id !== wildcard.id && c.suit === s && c.rank !== '2' && c.rank !== 'Joker');
+    suitCards.sort((a, b) => (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0));
+    for (let i = 0; i < suitCards.length - 1; i++) {
+      const c1 = suitCards[i];
+      const c2 = suitCards[i+1];
+      const v1 = rankOrderVals[c1.rank];
+      const v2 = rankOrderVals[c2.rank];
+      if (v2 === v1 + 1 || v2 === v1 + 2) {
+        const candidate = [c1, c2, wildcard];
+        if (validateMeld(candidate).valid) {
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
 // SIMULADOR DE BAJADA DE LA IA PARA CÁLCULO DE PUNTOS Y CARTAS JUGADAS
 function simulateBotMelding(hand, existingMelds) {
   let tempHand = [...hand];
@@ -1548,6 +1593,20 @@ function simulateBotMelding(hand, existingMelds) {
       const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
       for (let cIdx = 0; cIdx < tempHand.length; cIdx++) {
         const card = tempHand[cIdx];
+        const isWildcard = card.rank === '2' || card.rank === 'Joker';
+        if (isWildcard) {
+          if (isCurrentCleanCanastra) continue;
+          if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
+
+          // Si el comodín puede unirse a cartas en mano para formar un juego nuevo (trío o escalera),
+          // no consumirlo en un acople simple de 1 carta (salvo que cree canasta o vacíe la mano)
+          const canCompleteCanastraNow = currentMeld.length === 6;
+          const canTakeMortoNow = tempHand.length === 1;
+          if (!canCompleteCanastraNow && !canTakeMortoNow && canWildcardFormNewMeldInHand(card, tempHand)) {
+            continue;
+          }
+        }
+
         const combined = [...currentMeld, card];
         const result = validateMeld(combined);
         if (result.valid) {
@@ -1771,13 +1830,22 @@ function performOneBotMeldAction(botIdx) {
       const isWildcard = card.rank === '2' || card.rank === 'Joker';
       
       // REGLAS PARA ACOMODAR COMODINES (MONOS):
-      // Priorizar los monos: si se pueden acomodar en mesa, debe hacerlo sin dudar.
+      // Priorizar los monos: si se pueden acomodar en mesa, debe hacerlo.
       // Solo evitar:
       // 1. Ensuciar una canasta que ya es limpia (7+ cartas naturales)
       // 2. Poner más de un comodín en el mismo juego (regla de máximo 1 comodín)
+      // 3. PRIORIDAD TÁCTICA: Si el comodín puede unirse a dos cartas de la mano para BAJAR UN NUEVO JUEGO (trío o escalera),
+      //    NO malgastarlo en un acople simple de 1 carta. Bajar el nuevo juego descarga 3 cartas a la vez de la mano
+      //    (acercando al muerto o al cierre) y rescata parejas huérfanas en mano (ej. dos 3 con el 2).
       if (isWildcard) {
         if (isCurrentCleanCanastra) continue;
         if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
+
+        const canCompleteCanastraNow = currentMeld.length === 6;
+        const canTakeMortoNow = botHand.length === 1;
+        if (!canCompleteCanastraNow && !canTakeMortoNow && canWildcardFormNewMeldInHand(card, botHand)) {
+          continue; // Reservar el comodín para bajar el nuevo juego con las 2 cartas de la mano
+        }
       }
 
       const combined = [...currentMeld, card];
