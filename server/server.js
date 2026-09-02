@@ -1353,12 +1353,16 @@ function runBotTurn(botIdx) {
       const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
       const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
       const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
-      const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
+      const opponentNearCanasta = opponentMelds.some(m => m.length >= 6);
+      const opponentCanWinSoon = opponentHasCanasta || opponentNearCanasta;
 
-      // MODO DE EMERGENCIA DEFENSIVA:
-      // Se activa ÚNICAMENTE si el oponente YA se fue al muerto (opponentHasMorto === true),
-      // y tiene canasta o juegos fuertes o pocas cartas (<=6), mientras que la IA todavía NO fue al muerto.
-      const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
+      // MODO DE EMERGENCIA DEFENSIVA (Peligro REAL de corte del rival):
+      // Para que haya peligro real de corte, el rival OBLIGATORIAMENTE debe:
+      // 1. Haber tomado el muerto (opponentHasMorto === true).
+      // 2. Tener al menos 1 canasta ya hecha O un juego de 6 cartas a tiro de canasta (opponentCanWinSoon).
+      // 3. Tener pocas cartas en mano (opponentHandSize <= 5).
+      // Si el rival NO tiene canasta ni juego de 6 cartas, ¡NO PUEDE CORTAR! No hay peligro inminente.
+      const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && opponentCanWinSoon && (opponentHandSize <= 5);
       const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
 
       // 1. Evaluar si la carta superior sirve directamente para acoplar o armar un juego ya
@@ -1391,7 +1395,7 @@ function runBotTurn(botIdx) {
         drewFromDiscard = true;
       } else if (isDefensiveSurvivalMode || opponentImminentWin) {
         // =========================================================================
-        // RECIÉN CUANDO EL RIVAL SE VA AL MUERTO: MODO DE EMERGENCIA
+        // RECIÉN CUANDO EL RIVAL SE VA AL MUERTO Y TIENE CANASTA (PELIGRO REAL DE CORTE):
         // =========================================================================
         // Tratar de no acumular puntos levantando posibles juegos futuros.
         // Solo levantar si la carta superior sirve Y todas las cartas del pozo se bajan
@@ -1401,15 +1405,18 @@ function runBotTurn(botIdx) {
         }
       } else {
         // =========================================================================
-        // MIENTRAS EL RIVAL NO SE HAYA IDO AL MUERTO: JUEGO ACTIVO Y ACUMULACIÓN INTELIGENTE
+        // SI EL RIVAL NO TIENE MUERTO, O TIENE MUERTO PERO ESTÁ LEJOS DE CERRAR (0 CANASTAS):
         // =========================================================================
-        // Ya teniendo 30 puntos bajados, la IA compite activamente por el pozo según probabilidades.
-        // Si no levanta, el rival se lleva todo el pozo y la IA se queda con pocos puntos.
+        // La IA analiza que el rival está lejos de cortar. Si la carta superior sirve
+        // para acoplar a sus juegos (ej. K de trébol) o hay comodines, ¡LEVANTAR!
         const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
 
         // 1. Si la carta superior sirve de inmediato (acople, nueva combinación o comodín):
         if (topCardServes) {
-          drewFromDiscard = true;
+          // Si el rival tiene muerto (pero 0 canastas), levantar si el pozo no satura en exceso (<= 3 cartas no bajables)
+          if (!opponentHasMorto || unplayableAdded <= 3) {
+            drewFromDiscard = true;
+          }
         }
         // 2. Si hay algún comodín en el pozo (2 o Joker):
         else if (pileEval.hasWildcard || isWildcard) {
@@ -1417,11 +1424,15 @@ function runBotTurn(botIdx) {
         }
         // 3. Si la carta superior conecta con la mano (para futura escalera o triada):
         else if (pileEval.topConn > 0) {
-          drewFromDiscard = true;
+          if (!opponentHasMorto || unplayableAdded <= 2) {
+            drewFromDiscard = true;
+          }
         }
         // 4. Si el pozo contiene cartas útiles que conectan con la mano:
         else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
-          drewFromDiscard = true;
+          if (!opponentHasMorto || unplayableAdded <= 2) {
+            drewFromDiscard = true;
+          }
         }
         // 5. Si al recoger el pozo puede bajar al menos un juego de inmediato:
         else if (cardsGainedFromPile >= 3) {
@@ -1429,7 +1440,9 @@ function runBotTurn(botIdx) {
         }
         // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
         else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
-          drewFromDiscard = true;
+          if (!opponentHasMorto) {
+            drewFromDiscard = true;
+          }
         }
       }
     }
@@ -1685,10 +1698,11 @@ function performOneBotMeldAction(botIdx) {
   const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
   const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
   const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
-  const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
+  const opponentNearCanasta = opponentMelds.some(m => m.length >= 6);
+  const opponentCanWinSoon = opponentHasCanasta || opponentNearCanasta;
   const opponentHasMorto = gameState.is4Player ? (gameState.mortosTaken[opponentTeamIdx] !== null) : gameState.mortosTaken[opponentTeamIdx];
   const botHasMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
-  const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
+  const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && opponentCanWinSoon && (opponentHandSize <= 5);
   const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
   const deckCount = gameState.drawPile.length;
 
@@ -1722,22 +1736,28 @@ function performOneBotMeldAction(botIdx) {
   const isCloseToMorto = !botHasMorto && botHand.length <= 4;
 
   // 1. Intentar realizar exactamente UN acople
-  const minCardsHand = !botHasMorto ? 0 : (canWinThisTurn ? 0 : 2);
   for (let mIdx = 0; mIdx < botMelds.length; mIdx++) {
     const currentMeld = botMelds[mIdx];
     const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
+    const createsCanastra = currentMeld.length >= 6;
+    const canBatAfterThis = botHasMorto && (canastrasCount >= requiredCanastras || createsCanastra);
+    const minCardsHand = !botHasMorto ? 0 : (canBatAfterThis ? 0 : 2);
 
     for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
       const card = botHand[cIdx];
       if (botHand.length <= minCardsHand) continue;
 
       const isWildcard = card.rank === '2' || card.rank === 'Joker';
-      const completesCanastra = currentMeld.length === 6;
-      // PRIORIDAD 3: Canastas limpias (cartas naturales acoplan libremente preservando limpieza)
-      // PRIORIDAD 4: Canastas sucias (comodines completan canasta de 7, o habilitan ir al muerto / ganar)
-      // Flexibilidad: si está cerca del muerto (<=4 cartas), puede usar comodín para vaciar mano
-      const wildcardsAllowed = isWildcard ? (completesCanastra || canTakeMortoThisTurn || canWinThisTurn || opponentImminentWin || isDefensiveSurvivalMode || isCloseToMorto) : true;
-      if (!wildcardsAllowed) continue;
+      
+      // REGLAS PARA ACOMODAR COMODINES (MONOS):
+      // Priorizar los monos: si se pueden acomodar en mesa, debe hacerlo sin dudar.
+      // Solo evitar:
+      // 1. Ensuciar una canasta que ya es limpia (7+ cartas naturales)
+      // 2. Poner más de un comodín en el mismo juego (regla de máximo 1 comodín)
+      if (isWildcard) {
+        if (isCurrentCleanCanastra) continue;
+        if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
+      }
 
       const combined = [...currentMeld, card];
       const result = validateMeld(combined);
@@ -1791,7 +1811,7 @@ function performOneBotMeldAction(botIdx) {
   const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
   if (freshWildcards.length > 0) {
     for (let suit of suits) {
-      let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2');
+      let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
       suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
       for (let i = 0; i < suitCards.length - 1; i++) {
         const c1 = suitCards[i];
@@ -1848,7 +1868,8 @@ function runBotDiscardPhase(botIdx) {
   }
 
   // FASE 3: DESCARTAR UTILIZANDO EL MOTOR DE UTILIDAD HEURÍSTICA
-  let discardIdx = 0;
+  const hasNonWildcards = botHand.some(c => c.rank !== '2' && c.rank !== 'Joker');
+  let discardIdx = hasNonWildcards ? botHand.findIndex(c => c.rank !== '2' && c.rank !== 'Joker') : 0;
   let minScore = Infinity;
 
   const nextPlayerIdx = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
@@ -1863,15 +1884,25 @@ function runBotDiscardPhase(botIdx) {
   const oppCleanCount = opponentMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
   const oppDirtyCount = opponentMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
   const opponentHasCanasta = oppCleanCount + oppDirtyCount > 0;
-  const opponentHasStrongMelds = opponentHasCanasta || opponentMelds.some(m => m.length >= 5);
+  const opponentNearCanasta = opponentMelds.some(m => m.length >= 6);
+  const opponentCanWinSoon = opponentHasCanasta || opponentNearCanasta;
   const opponentHasMorto = gameState.is4Player ? (gameState.mortosTaken[opponentTeamIdx] !== null) : gameState.mortosTaken[opponentTeamIdx];
   const botHasMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
 
-  const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && (opponentHasStrongMelds || opponentHandSize <= 6);
+  const isDefensiveSurvivalMode = !gameState.is4Player && opponentHasMorto && !botHasMorto && opponentCanWinSoon && (opponentHandSize <= 5);
   const opponentImminentWin = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 3;
 
   for (let i = 0; i < botHand.length; i++) {
     const card = botHand[i];
+    const isWildcard = card.rank === '2' || card.rank === 'Joker';
+
+    // REGLA FUNDAMENTAL DE BURACO:
+    // Bajo NINGÚN concepto descartar un mono (2 o Joker) salvo que no quede otra posibilidad
+    // (es decir, que la mano esté compuesta 100% exclusivamente de comodines).
+    if (isWildcard && hasNonWildcards) {
+      continue;
+    }
+
     let score = 0;
 
     // Filtro de peligro contra oponentes: ¿Le sirve al rival para acoplar o agrandar sus juegos?
