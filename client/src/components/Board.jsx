@@ -310,17 +310,19 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
     }
   }, [gameState?.lastAction]);
 
-  // Alerta destacada (cartel bonito) cuando cualquier jugador toma el muerto
+  // Alerta destacada (cartel bonito flotante) cuando cualquier jugador toma el muerto
+  const mortoTimerRef = useRef(null);
   useEffect(() => {
-    if (gameState?.mortoAlert?.timestamp && gameState.mortoAlert.timestamp !== lastMortoAlertTimestampRef.current) {
-      lastMortoAlertTimestampRef.current = gameState.mortoAlert.timestamp;
-      setMortoBanner(gameState.mortoAlert);
-      const timer = setTimeout(() => {
+    const alertData = gameState?.mortoAlert;
+    if (alertData?.timestamp && alertData.timestamp !== lastMortoAlertTimestampRef.current) {
+      lastMortoAlertTimestampRef.current = alertData.timestamp;
+      setMortoBanner(alertData);
+      if (mortoTimerRef.current) clearTimeout(mortoTimerRef.current);
+      mortoTimerRef.current = setTimeout(() => {
         setMortoBanner(null);
-      }, 4200); // 4.2 segundos visible
-      return () => clearTimeout(timer);
+      }, 3500);
     }
-  }, [gameState?.mortoAlert]);
+  }, [gameState?.mortoAlert?.timestamp]);
 
   // Auto-scroll del log de acciones
   useEffect(() => {
@@ -506,71 +508,82 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
         </div>
       )}
 
-      {/* CARTEL BONITO ANUNCIANDO LA TOMA DEL MUERTO */}
+      {/* CARTEL BONITO ANUNCIANDO LA TOMA DEL MUERTO (BANNER FLOTANTE SIN DESENFOQUE) */}
       {mortoBanner && (
         <div 
-          className="morto-alert-overlay animate-fade-in"
+          className="morto-toast-container animate-fade-in"
           onClick={() => setMortoBanner(null)}
-          style={{ cursor: 'pointer' }}
         >
           <div 
-            className="morto-alert-card glass-panel animate-scale-up"
+            className="morto-toast-card glass-panel"
             style={{
               background: (mortoBanner.playerIdx === safePlayerIndex || (is4P && getTeamOwnerIndex(mortoBanner.playerIdx, is4P) === myTeamIdx))
-                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.22) 0%, rgba(6, 95, 70, 0.5) 100%)'
-                : 'linear-gradient(135deg, rgba(168, 85, 247, 0.22) 0%, rgba(88, 28, 135, 0.5) 100%)',
+                ? 'linear-gradient(135deg, rgba(16, 185, 129, 0.95) 0%, rgba(6, 95, 70, 0.95) 100%)'
+                : 'linear-gradient(135deg, rgba(147, 51, 234, 0.95) 0%, rgba(88, 28, 135, 0.95) 100%)',
               borderColor: (mortoBanner.playerIdx === safePlayerIndex || (is4P && getTeamOwnerIndex(mortoBanner.playerIdx, is4P) === myTeamIdx))
-                ? '#10b981'
-                : '#a855f7',
+                ? '#34d399'
+                : '#c084fc',
               boxShadow: (mortoBanner.playerIdx === safePlayerIndex || (is4P && getTeamOwnerIndex(mortoBanner.playerIdx, is4P) === myTeamIdx))
-                ? '0 25px 60px rgba(0,0,0,0.8), 0 0 40px rgba(16, 185, 129, 0.45)'
-                : '0 25px 60px rgba(0,0,0,0.8), 0 0 40px rgba(168, 85, 247, 0.45)'
+                ? '0 12px 35px rgba(0,0,0,0.6), 0 0 25px rgba(16, 185, 129, 0.5)'
+                : '0 12px 35px rgba(0,0,0,0.6), 0 0 25px rgba(168, 85, 247, 0.5)'
             }}
           >
-            <div className="alert-sparkle" style={{ fontSize: '3.6rem', marginBottom: '8px' }}>
+            <div style={{ fontSize: '2rem', lineHeight: '1' }}>
               🎴
             </div>
-            <div style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: '6px',
-              padding: '5px 16px',
-              borderRadius: '20px',
-              fontSize: '0.78rem',
-              fontWeight: 800,
-              textTransform: 'uppercase',
-              letterSpacing: '1.5px',
-              marginBottom: '12px',
-              background: mortoBanner.isDirect ? 'rgba(245, 158, 11, 0.25)' : 'rgba(56, 189, 248, 0.25)',
-              color: mortoBanner.isDirect ? '#fbbf24' : '#38bdf8',
-              border: `1px solid ${mortoBanner.isDirect ? '#fbbf24' : '#38bdf8'}`
-            }}>
-              <span>{mortoBanner.isDirect ? '⚡ ENTRADA DIRECTA' : '🔄 ENTRADA INDIRECTA'}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '2px', textAlign: 'left' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{
+                  fontSize: '0.68rem',
+                  fontWeight: 800,
+                  textTransform: 'uppercase',
+                  letterSpacing: '1px',
+                  padding: '2px 8px',
+                  borderRadius: '10px',
+                  background: mortoBanner.isDirect ? 'rgba(251, 191, 36, 0.3)' : 'rgba(56, 189, 248, 0.3)',
+                  color: mortoBanner.isDirect ? '#fef08a' : '#e0f2fe',
+                  border: `1px solid ${mortoBanner.isDirect ? '#fde047' : '#7dd3fc'}`
+                }}>
+                  {mortoBanner.isDirect ? '⚡ Muerto Directo' : '🔄 Muerto Indirecto'}
+                </span>
+                <span style={{ fontSize: '0.7rem', color: 'rgba(255,255,255,0.75)' }}>
+                  {mortoBanner.isDirect ? '(continúa jugando)' : '(próximo turno)'}
+                </span>
+              </div>
+              <h3 style={{
+                fontSize: '1.25rem',
+                fontWeight: 800,
+                color: '#ffffff',
+                margin: 0,
+                textShadow: '0 1px 4px rgba(0,0,0,0.4)'
+              }}>
+                ¡{mortoBanner.playerName} tomó el Muerto! (+11 cartas)
+              </h3>
             </div>
-            <h2 style={{
-              fontSize: '2rem',
-              fontWeight: 900,
-              color: '#ffffff',
-              margin: '6px 0 10px 0',
-              textShadow: '0 2px 12px rgba(0,0,0,0.6)'
-            }}>
-              ¡{mortoBanner.playerName} fue al Muerto!
-            </h2>
-            <div className="alert-divider" style={{ margin: '10px auto 14px auto', width: '80px', height: '2px', background: 'rgba(255,255,255,0.3)' }}></div>
-            <p style={{
-              fontSize: '1.05rem',
-              color: '#f8fafc',
-              margin: '0 0 8px 0',
-              fontWeight: 600,
-              lineHeight: '1.4'
-            }}>
-              {mortoBanner.isDirect
-                ? '¡Colocó todas sus cartas en mesa! Recibe las 11 cartas y continúa su turno.'
-                : '¡Se quedó sin cartas al descartar! Recibe las 11 cartas para su próximo turno.'}
-            </p>
-            <span style={{ fontSize: '0.72rem', color: '#94a3b8', fontStyle: 'italic', marginTop: '12px', display: 'block' }}>
-              (Hacé clic en cualquier lugar para cerrar)
-            </span>
+            <button 
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setMortoBanner(null);
+              }}
+              style={{
+                background: 'rgba(255,255,255,0.15)',
+                border: 'none',
+                color: '#fff',
+                width: '24px',
+                height: '24px',
+                borderRadius: '50%',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: '0.8rem',
+                marginLeft: '8px'
+              }}
+              title="Cerrar aviso"
+            >
+              ✕
+            </button>
           </div>
         </div>
       )}
