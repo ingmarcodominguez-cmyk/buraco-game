@@ -1596,7 +1596,11 @@ function simulateBotMelding(hand, existingMelds) {
         const isWildcard = card.rank === '2' || card.rank === 'Joker';
         if (isWildcard) {
           if (isCurrentCleanCanastra) continue;
-          if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
+          if (currentMeld.some(c => c && c.isUsedAsWildcard)) {
+            const runSuit = currentMeld.find(rc => rc.rank !== 'Joker' && rc.rank !== '2')?.suit;
+            const hasSuitTwo = currentMeld.some(c => c && c.rank === '2' && c.suit === runSuit);
+            if (!hasSuitTwo) continue;
+          }
 
           // Si el comodín puede unirse a cartas en mano para formar un juego nuevo (trío o escalera),
           // no consumirlo en un acople simple de 1 carta
@@ -1837,7 +1841,11 @@ function performOneBotMeldAction(botIdx) {
       //    (acercando al muerto o al cierre) y rescata parejas huérfanas en mano (ej. dos 3 con el 2).
       if (isWildcard) {
         if (isCurrentCleanCanastra) continue;
-        if (currentMeld.some(c => c && c.isUsedAsWildcard)) continue;
+        if (currentMeld.some(c => c && c.isUsedAsWildcard)) {
+          const runSuit = currentMeld.find(rc => rc.rank !== 'Joker' && rc.rank !== '2')?.suit;
+          const hasSuitTwo = currentMeld.some(c => c && c.rank === '2' && c.suit === runSuit);
+          if (!hasSuitTwo) continue;
+        }
 
         // PRIORIDAD TÁCTICA DE COMODINES:
         // Si el comodín puede formar un nuevo juego (trío o escalera) con 2 cartas de la mano:
