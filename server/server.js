@@ -381,16 +381,31 @@ function checkMortoIndirectInRoom(room, playerIdx) {
 }
 
 function checkAndTriggerBotTurnInRoom(room) {
-  if (!room || !room.gameState || room.gameState.status !== 'playing' || room.isBotThinking) return;
+  if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+
+  // Timeout de seguridad: Si la IA lleva pensando más de 10 segundos, liberar semáforo
+  if (room.isBotThinking && room.botThinkingTimestamp && (Date.now() - room.botThinkingTimestamp > 10000)) {
+    console.warn(`Reseteando semáforo isBotThinking de IA en sala ${room.id} por timeout de seguridad.`);
+    room.isBotThinking = false;
+  }
+
+  if (room.isBotThinking) return;
 
   const botIdx = room.gameState.turn;
   const activePlayer = room.players[botIdx];
 
   if (activePlayer && activePlayer.isBot) {
     room.isBotThinking = true;
+    room.botThinkingTimestamp = Date.now();
     if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
     room.botTurnTimeout = setTimeout(() => {
-      runBotTurnInRoom(room, botIdx);
+      try {
+        runBotTurnInRoom(room, botIdx);
+      } catch (err) {
+        console.error(`Error en ejecución de IA en sala ${room.id}:`, err);
+        room.isBotThinking = false;
+        sendStateToRoom(room);
+      }
     }, 1500); // Demora simulando pensar
   }
 }
@@ -1393,7 +1408,6 @@ function runBotTurnInRoom(room, botIdx) {
 
   const gameState = room.gameState;
   const players = room.players;
-  let isBotThinking = false; // local shadow
   const sendStateToAll = () => sendStateToRoom(room);
   const startPlayerTurn = (nextTurn) => startPlayerTurnInRoom(room, nextTurn);
   const checkMortoDirect = (bIdx) => checkMortoDirectInRoom(room, bIdx);
@@ -1403,7 +1417,7 @@ function runBotTurnInRoom(room, botIdx) {
   const runBotDiscardPhase = (bIdx) => runBotDiscardPhaseInRoom(room, bIdx);
 
   if (!gameState || gameState.status !== 'playing') {
-    isBotThinking = false;
+    room.isBotThinking = false;
     return;
   }
 
@@ -1569,7 +1583,7 @@ function runBotTurnInRoom(room, botIdx) {
       gameState.turnState = 'confirm-scores';
       gameState.lastAction = 'El mazo de robo se ha agotado. Fin de la ronda. Esperando confirmación de puntos.';
       gameState.roundScores = calculateRoundScores(gameState);
-      isBotThinking = false;
+      room.isBotThinking = false;
       sendStateToAll();
       return;
     }
@@ -1580,13 +1594,13 @@ function runBotTurnInRoom(room, botIdx) {
   // Esperar 1.5s antes de Bajar / Acoplar
   setTimeout(() => {
     if (!gameState || gameState.status !== 'playing') {
-      isBotThinking = false;
+      room.isBotThinking = false;
       return;
     }
 
     function executeBotMeldStep() {
       if (!gameState || gameState.status !== 'playing') {
-        isBotThinking = false;
+        room.isBotThinking = false;
         return;
       }
 
@@ -2098,13 +2112,12 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
   }
   const gameState = room.gameState;
   const players = room.players;
-  let isBotThinking = false; // local shadow
   const sendStateToAll = () => sendStateToRoom(room);
   const startPlayerTurn = (nextTurn) => startPlayerTurnInRoom(room, nextTurn);
   const checkMortoIndirect = (bIdx) => checkMortoIndirectInRoom(room, bIdx);
 
   if (!gameState || gameState.status !== 'playing') {
-    isBotThinking = false;
+    room.isBotThinking = false;
     return;
   }
 
@@ -2116,7 +2129,7 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
   const deckCount = gameState.drawPile.length;
 
   if (botHand.length === 0) {
-    isBotThinking = false;
+    room.isBotThinking = false;
     return;
   }
 
@@ -2320,7 +2333,7 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       
       gameState.roundScores = calculateRoundScores(gameState);
       
-      isBotThinking = false;
+      room.isBotThinking = false;
       sendStateToAll();
       return;
     } else {
@@ -2342,7 +2355,7 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
 
   // Pasar turno al siguiente jugador (respetando sentido antihorario)
   const nextTurn = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
-  isBotThinking = false;
+  room.isBotThinking = false;
   startPlayerTurn(nextTurn);
 
   sendStateToAll();
