@@ -2,7 +2,7 @@
 import React, { useState } from 'react';
 import { User, Users, Globe, ArrowRight, Award } from 'lucide-react';
 
-export default function Lobby({ onJoin, localIp, players, connected, currentRoomId, onRoomChange }) {
+export default function Lobby({ onJoin, localIp, players, connected, currentRoomId, onRoomChange, roomsSummary = {} }) {
   const [name, setName] = useState('');
   const [selectedRoomOption, setSelectedRoomOption] = useState(currentRoomId || 'mesa-1');
   const [customRoomName, setCustomRoomName] = useState('');
@@ -11,6 +11,9 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
   const [playAgainstBot, setPlayAgainstBot] = useState(false);
   const [is4Player, setIs4Player] = useState(false);
   const [joined, setJoined] = useState(false);
+
+  const currentRoomInfo = selectedRoomOption !== 'custom' ? roomsSummary[selectedRoomOption] : null;
+  const isCurrentOccupied = currentRoomInfo ? currentRoomInfo.isOccupied : false;
 
   const handleRoomSelect = (val) => {
     setSelectedRoomOption(val);
@@ -26,6 +29,10 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
+    if (isCurrentOccupied) {
+      alert(`La ${selectedRoomOption.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible.`);
+      return;
+    }
     const finalRoomId = selectedRoomOption === 'custom'
       ? (customRoomName.trim() || 'mesa-personalizada')
       : selectedRoomOption;
@@ -79,12 +86,37 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                     onChange={(e) => handleRoomSelect(e.target.value)}
                     style={{ cursor: 'pointer', padding: '8px 12px', fontSize: '0.9rem' }}
                   >
-                    <option value="mesa-1">Mesa 1 (Sala Principal)</option>
-                    <option value="mesa-2">Mesa 2</option>
-                    <option value="mesa-3">Mesa 3</option>
-                    <option value="mesa-4">Mesa 4</option>
+                    <option value="mesa-1">
+                      Mesa 1 {roomsSummary['mesa-1']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                    </option>
+                    <option value="mesa-2">
+                      Mesa 2 {roomsSummary['mesa-2']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                    </option>
+                    <option value="mesa-3">
+                      Mesa 3 {roomsSummary['mesa-3']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                    </option>
+                    <option value="mesa-4">
+                      Mesa 4 {roomsSummary['mesa-4']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                    </option>
                     <option value="custom">Sala Privada (Código Personalizado)...</option>
                   </select>
+                  {isCurrentOccupied && (
+                    <div style={{ 
+                      marginTop: '6px', 
+                      padding: '6px 10px', 
+                      borderRadius: '6px', 
+                      background: 'rgba(239, 68, 68, 0.15)', 
+                      border: '1px solid rgba(239, 68, 68, 0.4)', 
+                      color: '#fca5a5', 
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px'
+                    }}>
+                      <span>⚠️</span>
+                      <span><strong>Mesa Ocupada:</strong> Hay una partida en curso. Elige otra mesa libre.</span>
+                    </div>
+                  )}
                   {selectedRoomOption === 'custom' && (
                     <input
                       type="text"

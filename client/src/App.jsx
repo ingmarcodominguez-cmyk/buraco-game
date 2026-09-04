@@ -22,6 +22,7 @@ export default function App() {
   const [selectedTargetScore, setSelectedTargetScore] = useState(3000);
   const [is4PlayerSetting, setIs4PlayerSetting] = useState(false);
   const [currentRoomId, setCurrentRoomId] = useState('mesa-1');
+  const [roomsSummary, setRoomsSummary] = useState({});
   const [joined, setJoined] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -119,6 +120,13 @@ export default function App() {
       }
     });
 
+    // Resumen de estado de todas las mesas
+    socket.on('rooms-summary', (summary) => {
+      if (summary) {
+        setRoomsSummary(summary);
+      }
+    });
+
     // Recibir actualizaciones del estado del juego en tiempo real
     socket.on('game-state', ({ gameState, playerIndex, lobbyPlayers, roomId }) => {
       setGameState(gameState);
@@ -160,6 +168,7 @@ export default function App() {
       socket.off('disconnect');
       socket.off('lobby-info');
       socket.off('lobby-update');
+      socket.off('rooms-summary');
       socket.off('game-state');
       socket.off('error-message');
       socket.off('game-aborted');
@@ -337,6 +346,7 @@ export default function App() {
           connected={connected}
           currentRoomId={currentRoomId}
           onRoomChange={handleRoomChange}
+          roomsSummary={roomsSummary}
         />
       ) : (
         <Board 

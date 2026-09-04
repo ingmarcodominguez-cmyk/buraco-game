@@ -395,6 +395,25 @@ function checkAndTriggerBotTurnInRoom(room) {
   }
 }
 
+function getRoomsSummary() {
+  const defaultList = ['mesa-1', 'mesa-2', 'mesa-3', 'mesa-4'];
+  const summary = {};
+  defaultList.forEach(id => {
+    const r = rooms.get(id);
+    if (!r) {
+      summary[id] = { isOccupied: false, playersCount: 0, players: [] };
+    } else {
+      const activeHumans = r.players.filter(p => p.socketId && !p.isBot);
+      const isGamePlaying = !!(r.gameState && (r.gameState.status === 'playing' || r.gameState.status === 'finished-visual'));
+      const isBotBusy = r.isAgainstBotSetting && activeHumans.length >= 1;
+      const isFull = activeHumans.length >= (r.is4PlayerSetting ? 4 : 2);
+      const isOccupied = activeHumans.length > 0 && (isGamePlaying || isBotBusy || isFull);
+      summary[id] = { isOccupied, playersCount: activeHumans.length, players: activeHumans.map(p => p.name) };
+    }
+  });
+  return summary;
+}
+
 // ============================================================================
 // GESTIÓN DE EVENTOS DE SOCKET CON AISLAMIENTO POR SALA
 // ============================================================================
@@ -402,38 +421,78 @@ function checkAndTriggerBotTurnInRoom(room) {
 io.on('connection', (socket) => {
   console.log(`Cliente conectado: ${socket.id}`);
 
-  // Enviar información inicial del lobby
+  // Enviar información inicial del lobby y estado de salas
   socket.emit('lobby-info', {
     localIp: LOCAL_IP,
     players: [],
     roomId: 'mesa-1'
   });
+  socket.emit('rooms-summary', getRoomsSummary());
 
   // Consultar estado de una sala específica desde el lobby
   socket.on('get-lobby-info', ({ roomId }) => {
     const cleanId = (roomId || 'mesa-1').trim().toLowerCase();
     const room = rooms.get(cleanId);
+    const activeHumans = room ? room.players.filter(p => p.socketId && !p.isBot) : [];
+    const isGamePlaying = !!(room && room.gameState && (room.gameState.status === 'playing' || room.gameState.status === 'finished-visual'));
+    const isBotBusy = room ? (room.isAgainstBotSetting && activeHumans.length >= 1) : false;
+    const isFull = room ? (activeHumans.length >= (room.is4PlayerSetting ? 4 : 2)) : false;
+    const isOccupied = activeHumans.length > 0 && (isGamePlaying || isBotBusy || isFull);
+
     socket.emit('lobby-update', {
       roomId: cleanId,
-      players: room ? room.players.filter(p => !p.isBot).map(p => p.name) : []
+      players: activeHumans.map(p => p.name),
+      isOccupied
     });
+    socket.emit('rooms-summary', getRoomsSummary());
   });
 
   // Unirse al lobby de una sala y configurar partida
   socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player, roomId }) => {
     const cleanRoomId = (roomId || 'mesa-1').trim().toLowerCase();
-    const room = getOrCreateRoom(cleanRoomId);
-    socket.roomId = cleanRoomId;
-    socket.join(cleanRoomId);
+    const cleanName = (name || '').trim();
+    if (!cleanName) return;
 
-    // Si la partida anterior ya finalizó en esta sala, limpiar el estado para empezar una nueva
-    if (room.gameState && room.gameState.status === 'finished') {
+    const room = getOrCreateRoom(cleanRoomId);
+
+    // Humanos activos en esta sala (distintos de este socket)
+    const activeHumans = room.players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
+    const hasActiveGame = room.gameState && (room.gameState.status === 'playing' || room.gameState.status === 'finished-visual');
+    const isPlayerReconnecting = room.players.some(p => p.name.toLowerCase() === cleanName.toLowerCase() && (!p.socketId || p.socketId === socket.id));
+
+    // Si la partida anterior ya finalizó en esta sala y no hay humanos activos, limpiar
+    if (room.gameState && room.gameState.status === 'finished' && activeHumans.length === 0) {
       console.log(`La partida anterior en sala ${cleanRoomId} ya finalizó. Limpiando sala.`);
       room.players = [];
       room.gameState = null;
       room.globalScores = [0, 0];
       room.isBotThinking = false;
     }
+
+    // Regla de sala ocupada: Si hay un juego activo y no es el mismo jugador reconectando
+    if (hasActiveGame && !isPlayerReconnecting) {
+      socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible (ej. Mesa 2).`);
+      socket.emit('rooms-summary', getRoomsSummary());
+      return;
+    }
+
+    // Si alguien ya está en esa sala jugando contra la IA:
+    if (room.isAgainstBotSetting && activeHumans.length >= 1 && !isPlayerReconnecting) {
+      socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} ya está ocupada jugando contra la IA. Por favor selecciona otra mesa libre (ej. Mesa 2).`);
+      socket.emit('rooms-summary', getRoomsSummary());
+      return;
+    }
+
+    // Si la mesa de humanos ya completó su cupo máximo de personas activas:
+    const maxCapacity = room.is4PlayerSetting ? 4 : 2;
+    if (activeHumans.length >= maxCapacity && !isPlayerReconnecting) {
+      socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} está llena (${maxCapacity} jugadores activos). Por favor selecciona otra mesa disponible.`);
+      socket.emit('rooms-summary', getRoomsSummary());
+      return;
+    }
+
+    socket.roomId = cleanRoomId;
+    socket.join(cleanRoomId);
 
     // Si no hay otros humanos conectados en esta sala, y cambian la configuración, reiniciar sala
     const otherActiveHumans = room.players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
@@ -581,8 +640,10 @@ io.on('connection', (socket) => {
         }
       }
       sendStateToRoom(room);
+      io.emit('rooms-summary', getRoomsSummary());
     } else {
       io.to(cleanRoomId).emit('lobby-update', { roomId: cleanRoomId, players: room.players.map(p => p.name) });
+      io.emit('rooms-summary', getRoomsSummary());
     }
   });
 
@@ -1170,6 +1231,7 @@ io.on('connection', (socket) => {
       if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
       io.to(room.id).emit('game-aborted', `${leavingPlayerName} ha abandonado la partida. Se canceló la mesa.`);
       socket.leave(room.id);
+      io.emit('rooms-summary', getRoomsSummary());
     }
   });
 
@@ -1192,10 +1254,12 @@ io.on('connection', (socket) => {
           console.log(`Limpiando sala ${room.id} por inactividad prolongada.`);
           if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
           rooms.delete(room.id);
+          io.emit('rooms-summary', getRoomsSummary());
         }
         room.cleanupTimeout = null;
       }, 20000);
     }
+    io.emit('rooms-summary', getRoomsSummary());
   });
 
   socket.on('confirm-round-scores', ({ roundBreakdown }) => {
