@@ -1108,6 +1108,22 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
           {/* Fase de Juego */}
           {canPlay && (
             <div style={{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+              {myMeldPoints > 0 && myMeldPoints < 30 && (
+                <div style={{ 
+                  width: '100%', 
+                  marginBottom: '4px', 
+                  padding: '4px 8px', 
+                  borderRadius: '6px', 
+                  background: 'rgba(245, 158, 11, 0.18)', 
+                  border: '1px solid rgba(245, 158, 11, 0.5)', 
+                  color: '#fef08a', 
+                  fontSize: '0.74rem',
+                  fontWeight: 600,
+                  textAlign: 'center'
+                }}>
+                  ⚠️ Apertura: <strong>{myMeldPoints}/30 pts</strong> en mesa (bajá otro juego para poder descartar)
+                </div>
+              )}
               <button 
                 className="btn-action btn-green" 
                 onClick={handleMeldSequence}
