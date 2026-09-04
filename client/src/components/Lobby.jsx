@@ -3,7 +3,13 @@ import React, { useState } from 'react';
 import { User, Users, Globe, ArrowRight, Award } from 'lucide-react';
 
 export default function Lobby({ onJoin, localIp, players, connected, currentRoomId, onRoomChange, roomsSummary = {} }) {
-  const [name, setName] = useState('');
+  const [name, setName] = useState(() => {
+    try {
+      return localStorage.getItem('buraco_player_name') || '';
+    } catch (e) {
+      return '';
+    }
+  });
   const [selectedRoomOption, setSelectedRoomOption] = useState(currentRoomId || 'mesa-1');
   const [customRoomName, setCustomRoomName] = useState('');
   const [requiredCanastras, setRequiredCanastras] = useState(1);
@@ -14,6 +20,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
 
   const currentRoomInfo = selectedRoomOption !== 'custom' ? roomsSummary[selectedRoomOption] : null;
   const isCurrentOccupied = currentRoomInfo ? currentRoomInfo.isOccupied : false;
+  const isReconnecting = Boolean(currentRoomInfo && currentRoomInfo.players && name.trim() && currentRoomInfo.players.some(p => p.toLowerCase() === name.trim().toLowerCase()));
 
   const handleRoomSelect = (val) => {
     setSelectedRoomOption(val);
@@ -29,13 +36,17 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    if (isCurrentOccupied) {
+    if (isCurrentOccupied && !isReconnecting) {
       alert(`La ${selectedRoomOption.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible.`);
       return;
     }
     const finalRoomId = selectedRoomOption === 'custom'
       ? (customRoomName.trim() || 'mesa-personalizada')
       : selectedRoomOption;
+    try {
+      localStorage.setItem('buraco_player_name', name.trim());
+      localStorage.setItem('buraco_room', finalRoomId);
+    } catch (err) {}
     onJoin(name.trim(), requiredCanastras, playAgainstBot, targetScore, is4Player, finalRoomId);
     setJoined(true);
   };
@@ -105,16 +116,22 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                       marginTop: '6px', 
                       padding: '6px 10px', 
                       borderRadius: '6px', 
-                      background: 'rgba(239, 68, 68, 0.15)', 
-                      border: '1px solid rgba(239, 68, 68, 0.4)', 
-                      color: '#fca5a5', 
+                      background: isReconnecting ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)', 
+                      border: isReconnecting ? '1px solid rgba(16, 185, 129, 0.4)' : '1px solid rgba(239, 68, 68, 0.4)', 
+                      color: isReconnecting ? '#6ee7b7' : '#fca5a5', 
                       fontSize: '0.8rem',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '6px'
                     }}>
-                      <span>⚠️</span>
-                      <span><strong>Mesa Ocupada:</strong> Hay una partida en curso. Elige otra mesa libre.</span>
+                      <span>{isReconnecting ? '🔄' : '⚠️'}</span>
+                      <span>
+                        {isReconnecting ? (
+                          <strong>Partida en curso detectada para tu usuario ({name.trim()}). Podés reconectarte.</strong>
+                        ) : (
+                          <strong>Mesa Ocupada: Hay una partida en curso. Elegí otra mesa libre.</strong>
+                        )}
+                      </span>
                     </div>
                   )}
                   {selectedRoomOption === 'custom' && (
@@ -213,7 +230,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                     onClick={() => setPlayAgainstBot(false)}
                     style={{ padding: '10px 16px', fontSize: '0.9rem' }}
                   >
-                    {is4Player ? 'Ingresar a Partida de 4' : 'Ingresar al Juego'} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
+                    {isReconnecting ? 'Reconectarse a la Mesa' : (is4Player ? 'Ingresar a Partida de 4' : 'Ingresar al Juego')} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
                   </button>
                   
                   <button 
@@ -227,7 +244,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                       boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)' 
                     }}
                   >
-                    {is4Player ? 'Jugar con Compañero Bot' : 'Jugar contra la PC (IA)'} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
+                    {isReconnecting ? 'Reconectarse contra la PC' : (is4Player ? 'Jugar con Compañero Bot' : 'Jugar contra la PC (IA)')} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
                   </button>
                 </div>
               </form>

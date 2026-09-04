@@ -1583,7 +1583,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
               </span>
             </div>
 
-            <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'center' }}>
+            <div style={{ display: 'flex', gap: '12px', marginTop: '20px', justifyContent: 'center', flexWrap: 'wrap' }}>
               <button 
                 className="btn-primary" 
                 onClick={() => {
@@ -1613,15 +1613,28 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
 
                   onAction('confirm-round-scores', { roundBreakdown });
                 }}
-                style={{ flexGrow: 1 }}
+                style={{ flexGrow: 1, padding: '12px 16px', fontSize: '0.95rem', fontWeight: 'bold' }}
               >
-                Confirmar y Anotar Ronda
+                Confirmar y Pasar a Siguiente Mano ➡️
               </button>
               
               <button 
                 className="btn-action btn-gray" 
-                onClick={() => onAction('restart-round')}
-                style={{ padding: '0 20px' }}
+                onClick={() => onAction('hide-scores-sheet')}
+                style={{ padding: '0 16px', fontSize: '0.88rem' }}
+                title="Cerrar la planilla para inspeccionar la mesa y cartas"
+              >
+                Volver a la Mesa 👁️
+              </button>
+
+              <button 
+                className="btn-action btn-gray" 
+                onClick={() => {
+                  if (window.confirm('¿Seguro que deseas anular esta ronda? Se repartirán de nuevo las cartas sin sumar puntos.')) {
+                    onAction('restart-round');
+                  }
+                }}
+                style={{ padding: '0 16px', fontSize: '0.88rem', color: '#f87171' }}
               >
                 Anular Ronda
               </button>

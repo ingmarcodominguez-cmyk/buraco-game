@@ -16,12 +16,24 @@ export default function App() {
   const [lobbyPlayers, setLobbyPlayers] = useState([]);
   const [gameState, setGameState] = useState(null);
   const [playerIndex, setPlayerIndex] = useState(null);
-  const [playerName, setPlayerName] = useState('');
+  const [playerName, setPlayerName] = useState(() => {
+    try {
+      return localStorage.getItem('buraco_player_name') || '';
+    } catch (e) {
+      return '';
+    }
+  });
   const [selectedCanastras, setSelectedCanastras] = useState(1);
   const [isAgainstBotSetting, setIsAgainstBotSetting] = useState(false);
   const [selectedTargetScore, setSelectedTargetScore] = useState(3000);
   const [is4PlayerSetting, setIs4PlayerSetting] = useState(false);
-  const [currentRoomId, setCurrentRoomId] = useState('mesa-1');
+  const [currentRoomId, setCurrentRoomId] = useState(() => {
+    try {
+      return localStorage.getItem('buraco_room') || 'mesa-1';
+    } catch (e) {
+      return 'mesa-1';
+    }
+  });
   const [roomsSummary, setRoomsSummary] = useState({});
   const [joined, setJoined] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');

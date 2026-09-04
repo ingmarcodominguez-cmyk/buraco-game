@@ -1021,6 +1021,15 @@ io.on('connection', (socket) => {
     sendStateToRoom(room);
   });
 
+  socket.on('hide-scores-sheet', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'finished') return;
+    if (room.gameState.turnState === 'match-over') return;
+    room.gameState.status = 'finished-visual';
+    room.gameState.turnState = 'match-over-visual';
+    sendStateToRoom(room);
+  });
+
   socket.on('keep-first-card', () => {
     const room = findRoomBySocketId(socket.id);
     if (!room || !room.gameState || !room.gameState.isFirstTurn) return;
@@ -1278,57 +1287,73 @@ io.on('connection', (socket) => {
   });
 
   socket.on('confirm-round-scores', ({ roundBreakdown }) => {
-    const room = findRoomBySocketId(socket.id);
-    if (!room || !room.gameState || room.gameState.status !== 'finished') return;
-    const gameState = room.gameState;
+    try {
+      const room = findRoomBySocketId(socket.id);
+      if (!room || !room.gameState || room.gameState.status !== 'finished') return;
+      const gameState = room.gameState;
 
-    const roundPointsTeam0 = roundBreakdown.team0.totalRound;
-    const roundPointsTeam1 = roundBreakdown.team1.totalRound;
+      const roundPointsTeam0 = Number(
+        roundBreakdown?.p0?.roundTotal ?? 
+        roundBreakdown?.team0?.totalRound ?? 
+        roundBreakdown?.team0?.roundTotal ?? 
+        0
+      );
+      const roundPointsTeam1 = Number(
+        roundBreakdown?.p1?.roundTotal ?? 
+        roundBreakdown?.team1?.totalRound ?? 
+        roundBreakdown?.team1?.roundTotal ?? 
+        0
+      );
 
-    room.globalScores[0] += roundPointsTeam0;
-    room.globalScores[1] += roundPointsTeam1;
+      room.globalScores[0] += roundPointsTeam0;
+      room.globalScores[1] += roundPointsTeam1;
 
-    const currentHistory = gameState.roundHistory || [];
-    currentHistory.push({
-      roundNumber: currentHistory.length + 1,
-      breakdown: roundBreakdown,
-      accumulatedScores: [...room.globalScores]
-    });
+      const currentHistory = gameState.roundHistory || [];
+      currentHistory.push({
+        roundNumber: currentHistory.length + 1,
+        breakdown: roundBreakdown,
+        accumulatedScores: [...room.globalScores]
+      });
 
-    const isMatchOver = room.globalScores[0] >= gameState.targetScore || room.globalScores[1] >= gameState.targetScore;
-    if (isMatchOver) {
-      gameState.status = 'match-over';
-      gameState.turnState = 'match-over';
-      gameState.scores = [...room.globalScores];
-      gameState.roundHistory = currentHistory;
-      sendStateToRoom(room);
-      return;
-    }
-
-    const currentRequiredCanastras = gameState.requiredCanastras;
-    const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
-    const maxPlayers = room.is4PlayerSetting ? 4 : 2;
-    const nextStarter = (previousStarter + 1) % maxPlayers;
-
-    const newGame = initGame(room.is4PlayerSetting);
-    newGame.starterIndex = nextStarter;
-    newGame.turn = nextStarter;
-    for (let i = 0; i < maxPlayers; i++) {
-      newGame.players[i].name = room.players[i].name;
-      if (room.players[i] && room.players[i].isBot) {
-        newGame.players[i].isBot = true;
+      const currentTargetScore = gameState.targetScore || room.targetScoreSetting || 3000;
+      const isMatchOver = room.globalScores[0] >= currentTargetScore || room.globalScores[1] >= currentTargetScore;
+      if (isMatchOver) {
+        gameState.status = 'finished';
+        gameState.turnState = 'match-over';
+        gameState.scores = [...room.globalScores];
+        gameState.roundHistory = currentHistory;
+        sendStateToRoom(room);
+        return;
       }
-    }
-    newGame.requiredCanastras = currentRequiredCanastras;
-    newGame.roundHistory = currentHistory;
-    newGame.scores = [...room.globalScores];
-    newGame.lastAction = `Comienza nueva ronda. Sale de mano ${newGame.players[nextStarter].name}.`;
 
-    room.gameState = newGame;
-    room.isBotThinking = false;
-    if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
-    startPlayerTurnInRoom(room, nextStarter);
-    sendStateToRoom(room);
+      const currentRequiredCanastras = gameState.requiredCanastras || room.requiredCanastrasSetting || 1;
+      const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
+      const maxPlayers = room.is4PlayerSetting ? 4 : 2;
+      const nextStarter = (previousStarter + 1) % maxPlayers;
+
+      const newGame = initGame(room.is4PlayerSetting);
+      newGame.starterIndex = nextStarter;
+      newGame.turn = nextStarter;
+      for (let i = 0; i < maxPlayers; i++) {
+        newGame.players[i].name = room.players[i].name;
+        if (room.players[i] && room.players[i].isBot) {
+          newGame.players[i].isBot = true;
+        }
+      }
+      newGame.requiredCanastras = currentRequiredCanastras;
+      newGame.targetScore = currentTargetScore;
+      newGame.roundHistory = currentHistory;
+      newGame.scores = [...room.globalScores];
+      newGame.lastAction = `Comienza nueva ronda. Sale de mano ${newGame.players[nextStarter].name}.`;
+
+      room.gameState = newGame;
+      room.isBotThinking = false;
+      if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+      startPlayerTurnInRoom(room, nextStarter);
+      sendStateToRoom(room);
+    } catch (err) {
+      console.error('Error en confirm-round-scores:', err);
+    }
   });
 });
 
@@ -1665,6 +1690,58 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
   return false;
 }
 
+// HELPER: Comprueba si una carta natural (no comodín) puede formar un juego nuevo independiente (secuencia de 3+ o trío) con cartas de la mano
+function canNaturalCardFormIndependentMeldInHand(card, hand) {
+  if (!card || card.rank === '2' || card.rank === 'Joker') return false;
+
+  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+  const cardVal = rankOrderVals[card.rank];
+  if (!cardVal) return false;
+
+  // 1. ¿Puede formar una secuencia limpia de 3+ cartas de su mismo palo en mano?
+  const sameSuitCards = hand.filter(c => c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker');
+  const distinctVals = Array.from(new Set(sameSuitCards.map(c => rankOrderVals[c.rank]))).sort((a, b) => a - b);
+  
+  for (let i = 0; i < distinctVals.length; i++) {
+    let runLength = 1;
+    let containsCard = (distinctVals[i] === cardVal);
+    for (let j = i + 1; j < distinctVals.length; j++) {
+      if (distinctVals[j] === distinctVals[j - 1] + 1) {
+        runLength++;
+        if (distinctVals[j] === cardVal) containsCard = true;
+      } else {
+        break;
+      }
+    }
+    if (runLength >= 3 && containsCard) {
+      return true;
+    }
+  }
+
+  // 2. ¿Puede formar una secuencia sucia de 3 cartas usando un comodín de la mano?
+  const wildcards = hand.filter(c => c.rank === '2' || c.rank === 'Joker');
+  if (wildcards.length > 0) {
+    for (let other of sameSuitCards) {
+      if (other.id === card.id) continue;
+      const otherVal = rankOrderVals[other.rank];
+      const diff = Math.abs(otherVal - cardVal);
+      if (diff === 1 || diff === 2) {
+        const candidate = [card, other, wildcards[0]];
+        if (validateMeld(candidate).valid) {
+          return true;
+        }
+      }
+    }
+  }
+
+  // 3. ¿Puede formar un grupo (trío de mismo rank) en mano?
+  const sameRankCards = hand.filter(c => c.rank === card.rank && c.rank !== '2' && c.rank !== 'Joker');
+  if (sameRankCards.length >= 3) return true;
+  if (sameRankCards.length === 2 && wildcards.length > 0) return true;
+
+  return false;
+}
+
 // SIMULADOR DE BAJADA DE LA IA PARA CÁLCULO DE PUNTOS Y CARTAS JUGADAS
 function simulateBotMelding(hand, existingMelds) {
   let tempHand = [...hand];
@@ -1692,6 +1769,11 @@ function simulateBotMelding(hand, existingMelds) {
           // Si el comodín puede unirse a cartas en mano para formar un juego nuevo (trío o escalera),
           // no consumirlo en un acople simple de 1 carta
           if (canWildcardFormNewMeldInHand(card, tempHand)) {
+            continue;
+          }
+        } else if (currentMeld.length >= 7) {
+          // Si el juego en mesa ya es canasta, no acoplar cartas que puedan formar un nuevo juego independiente
+          if (canNaturalCardFormIndependentMeldInHand(card, tempHand)) {
             continue;
           }
         }
@@ -1728,7 +1810,21 @@ function simulateBotMelding(hand, existingMelds) {
         const curVal = rankOrder[card.rank];
         if (curVal === lastVal + 1) run.push(card);
         else if (curVal > lastVal + 1) {
-          if (run.length >= 3) {
+          if (run.length >= 10) {
+            const canastaPart = run.slice(run.length - 7);
+            const remainderPart = run.slice(0, run.length - 7);
+            const resC = validateMeld(canastaPart);
+            const resR = validateMeld(remainderPart);
+            if (resC.valid && resR.valid) {
+              tempMelds.push(resC.cards);
+              tempMelds.push(resR.cards);
+              cardsPlayed += run.length;
+              run.forEach(rc => {
+                const idx = tempHand.findIndex(c => c.id === rc.id);
+                if (idx !== -1) tempHand.splice(idx, 1);
+              });
+            }
+          } else if (run.length >= 3) {
             const result = validateMeld(run);
             if (result.valid) {
               tempMelds.push(result.cards);
@@ -1743,7 +1839,21 @@ function simulateBotMelding(hand, existingMelds) {
         }
       }
     }
-    if (run.length >= 3) {
+    if (run.length >= 10) {
+      const canastaPart = run.slice(run.length - 7);
+      const remainderPart = run.slice(0, run.length - 7);
+      const resC = validateMeld(canastaPart);
+      const resR = validateMeld(remainderPart);
+      if (resC.valid && resR.valid) {
+        tempMelds.push(resC.cards);
+        tempMelds.push(resR.cards);
+        cardsPlayed += run.length;
+        run.forEach(rc => {
+          const idx = tempHand.findIndex(c => c.id === rc.id);
+          if (idx !== -1) tempHand.splice(idx, 1);
+        });
+      }
+    } else if (run.length >= 3) {
       const result = validateMeld(run);
       if (result.valid) {
         tempMelds.push(result.cards);
@@ -1967,6 +2077,14 @@ function performOneBotMeldActionInRoom(room, botIdx) {
             continue;
           }
         }
+      } else if (currentMeld.length >= 7) {
+        // TÁCTICA CANASTA COMPLETA:
+        // Si el juego en mesa ya es canasta (7 o más cartas) y la IA no está cerrando la partida o yendo al muerto inmediatamente,
+        // no acoplarle cartas naturales si esas cartas pueden formar o iniciar un nuevo juego independiente en mano (camino a 2da canasta).
+        const isGoingForMortoOrWin = canTakeMortoThisTurn || canWinThisTurn;
+        if (!isGoingForMortoOrWin && canNaturalCardFormIndependentMeldInHand(card, botHand)) {
+          continue;
+        }
       }
 
       const combined = [...currentMeld, card];
@@ -2005,14 +2123,22 @@ function performOneBotMeldActionInRoom(room, botIdx) {
         const curVal = rankOrder[card.rank];
         if (curVal === lastVal + 1) run.push(card);
         else if (curVal > lastVal + 1) {
-          if (run.length >= 3) {
+          if (run.length >= 10) {
+            // Prioridad táctica: Si tiene 10 o más cartas continuas, bajar primero una canasta limpia de 7 cartas
+            // y dejar el resto (3+ cartas) en mano para bajarlas en la siguiente acción como juego separado.
+            const canastaCards = run.slice(run.length - 7);
+            if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
+          } else if (run.length >= 3) {
             if (tryMeldBotRun(run, botIdx, true)) return true;
           }
           run = [card];
         }
       }
     }
-    if (run.length >= 3) {
+    if (run.length >= 10) {
+      const canastaCards = run.slice(run.length - 7);
+      if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
+    } else if (run.length >= 3) {
       if (tryMeldBotRun(run, botIdx, true)) return true;
     }
   }
