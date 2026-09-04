@@ -2,18 +2,34 @@
 import React, { useState } from 'react';
 import { User, Users, Globe, ArrowRight, Award } from 'lucide-react';
 
-export default function Lobby({ onJoin, localIp, players, connected }) {
+export default function Lobby({ onJoin, localIp, players, connected, currentRoomId, onRoomChange }) {
   const [name, setName] = useState('');
+  const [selectedRoomOption, setSelectedRoomOption] = useState(currentRoomId || 'mesa-1');
+  const [customRoomName, setCustomRoomName] = useState('');
   const [requiredCanastras, setRequiredCanastras] = useState(1);
   const [targetScore, setTargetScore] = useState(3000);
   const [playAgainstBot, setPlayAgainstBot] = useState(false);
   const [is4Player, setIs4Player] = useState(false);
   const [joined, setJoined] = useState(false);
 
+  const handleRoomSelect = (val) => {
+    setSelectedRoomOption(val);
+    const targetRoom = val === 'custom' ? (customRoomName.trim() || 'mesa-personalizada') : val;
+    if (onRoomChange) onRoomChange(targetRoom);
+  };
+
+  const handleCustomRoomChange = (val) => {
+    setCustomRoomName(val);
+    if (onRoomChange) onRoomChange(val.trim() || 'mesa-personalizada');
+  };
+
   const handleSubmit = (e) => {
     e.preventDefault();
     if (!name.trim()) return;
-    onJoin(name.trim(), requiredCanastras, playAgainstBot, targetScore, is4Player);
+    const finalRoomId = selectedRoomOption === 'custom'
+      ? (customRoomName.trim() || 'mesa-personalizada')
+      : selectedRoomOption;
+    onJoin(name.trim(), requiredCanastras, playAgainstBot, targetScore, is4Player, finalRoomId);
     setJoined(true);
   };
 
@@ -50,6 +66,39 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
           <div className="lobby-right-col">
             {!joined ? (
               <form onSubmit={handleSubmit}>
+                <div className="form-group" style={{ marginBottom: '14px' }}>
+                  <label className="form-label" htmlFor="room-select" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '1rem' }}>🪑</span> Mesa / Sala de Juego
+                    </span>
+                  </label>
+                  <select
+                    id="room-select"
+                    className="input-text"
+                    value={selectedRoomOption}
+                    onChange={(e) => handleRoomSelect(e.target.value)}
+                    style={{ cursor: 'pointer', padding: '8px 12px', fontSize: '0.9rem' }}
+                  >
+                    <option value="mesa-1">Mesa 1 (Sala Principal)</option>
+                    <option value="mesa-2">Mesa 2</option>
+                    <option value="mesa-3">Mesa 3</option>
+                    <option value="mesa-4">Mesa 4</option>
+                    <option value="custom">Sala Privada (Código Personalizado)...</option>
+                  </select>
+                  {selectedRoomOption === 'custom' && (
+                    <input
+                      type="text"
+                      className="input-text"
+                      placeholder="Ej. familia-perez, torneo-amigos"
+                      value={customRoomName}
+                      onChange={(e) => handleCustomRoomChange(e.target.value)}
+                      maxLength={20}
+                      style={{ marginTop: '8px', padding: '8px 12px', fontSize: '0.85rem' }}
+                      required
+                    />
+                  )}
+                </div>
+
                 <div className="form-group" style={{ marginBottom: '14px' }}>
                   <label className="form-label" htmlFor="player-name" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -157,7 +206,10 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
                     <div className={`status-dot ${connected ? 'connected' : ''}`}></div>
                     <span>{connected ? 'Conectado' : 'Conectando...'}</span>
                   </div>
-                  <p style={{ color: '#94a3b8', fontSize: '0.75rem', margin: 0 }}>
+                  <div style={{ marginTop: '6px', fontSize: '0.85rem', color: '#38bdf8', fontWeight: 600 }}>
+                    🪑 {selectedRoomOption === 'custom' ? (customRoomName.toUpperCase() || 'SALA PRIVADA') : selectedRoomOption.toUpperCase()}
+                  </div>
+                  <p style={{ color: '#94a3b8', fontSize: '0.75rem', margin: '4px 0 0 0' }}>
                     {is4Player 
                       ? (playAgainstBot ? 'Esperando al segundo jugador...' : 'Esperando a 4 jugadores...')
                       : 'Esperando al segundo jugador...'
@@ -167,7 +219,7 @@ export default function Lobby({ onJoin, localIp, players, connected }) {
 
                 <div className="lobby-players-list" style={{ padding: '10px' }}>
                   <h3 style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '6px' }}>
-                    Jugadores en la sala:
+                    Jugadores en esta mesa:
                   </h3>
                   {players.length === 0 ? (
                     <p style={{ fontStyle: 'italic', color: '#64748b', fontSize: '0.8rem', margin: 0 }}>Nadie conectado aún</p>

@@ -92,15 +92,46 @@ function getLocalIP() {
 const LOCAL_IP = getLocalIP();
 const PORT = process.env.PORT || 3001;
 
-// Estado del lobby y del juego
-let players = []; // { socketId, name, isBot }
-let gameState = null; // Estado actual de la partida de Buraco
-let globalScores = [0, 0]; // Puntajes globales acumulados
-let requiredCanastrasSetting = 1; // Canastras configuradas desde el lobby (1 o 2)
-let targetScoreSetting = 3000; // Puntos para ganar la partida (modificable desde el lobby)
-let isAgainstBotSetting = false;
-let is4PlayerSetting = false;
-let cleanupTimeout = null; // Temporizador para limpieza diferida tras desconexión
+// ============================================================================
+// ARQUITECTURA MULTI-SALA: CLASE Y REGISTRO DE SALAS / MESAS INDEPENDIENTES
+// ============================================================================
+
+class BuracoRoom {
+  constructor(id) {
+    this.id = id; // e.g. "mesa-1", "mesa-2", o código personalizado
+    this.players = []; // { socketId, name, isBot }
+    this.gameState = null; // Estado de la partida de Buraco en esta mesa
+    this.globalScores = [0, 0]; // Puntajes acumulados en esta mesa
+    this.requiredCanastrasSetting = 1;
+    this.targetScoreSetting = 3000;
+    this.isAgainstBotSetting = false;
+    this.is4PlayerSetting = false;
+    this.cleanupTimeout = null;
+    this.isBotThinking = false;
+    this.botTurnTimeout = null;
+    this.createdAt = Date.now();
+  }
+}
+
+// Registro global de salas activas
+const rooms = new Map();
+
+function getOrCreateRoom(roomId) {
+  const cleanId = (roomId || 'mesa-1').trim().toLowerCase();
+  if (!rooms.has(cleanId)) {
+    rooms.set(cleanId, new BuracoRoom(cleanId));
+  }
+  return rooms.get(cleanId);
+}
+
+function findRoomBySocketId(socketId) {
+  for (const room of rooms.values()) {
+    if (room.players.some(p => p.socketId === socketId)) {
+      return room;
+    }
+  }
+  return null;
+}
 
 // Retorna el índice del líder del equipo (0 para Pareja 1, 1 para Pareja 2)
 function getTeamOwnerIndex(playerIdx, is4Player) {
@@ -108,27 +139,28 @@ function getTeamOwnerIndex(playerIdx, is4Player) {
   return playerIdx === 0 || playerIdx === 2 ? 0 : 1;
 }
 
-function startPlayerTurn(playerIdx) {
-  gameState.turn = playerIdx;
-  gameState.turnState = 'draw';
+function startPlayerTurnInRoom(room, playerIdx) {
+  if (!room || !room.gameState) return;
+  room.gameState.turn = playerIdx;
+  room.gameState.turnState = 'draw';
 }
 
-function applyUndo(requesterIdx, teamIdx) {
-  if (!gameState.turnStartSnapshot) return;
+function applyUndoInRoom(room, requesterIdx, teamIdx) {
+  if (!room || !room.gameState || !room.gameState.turnStartSnapshot) return;
   
-  const savedSnapshot = gameState.turnStartSnapshot;
-  const newTeamUndoCounts = [...gameState.teamUndoCounts];
+  const savedSnapshot = room.gameState.turnStartSnapshot;
+  const newTeamUndoCounts = [...room.gameState.teamUndoCounts];
   newTeamUndoCounts[teamIdx]++;
   const lastUndoTeam = teamIdx;
   
-  // Restaurar estado de juego completo
-  gameState = JSON.parse(JSON.stringify(savedSnapshot));
-  gameState.teamUndoCounts = newTeamUndoCounts;
-  gameState.lastUndoTeam = lastUndoTeam;
-  gameState.undoRequestedBy = null;
-  gameState.lastAction = `Jugada deshecha por ${players[requesterIdx].name} con el permiso del rival.`;
+  // Restaurar estado de juego completo en la sala
+  room.gameState = JSON.parse(JSON.stringify(savedSnapshot));
+  room.gameState.teamUndoCounts = newTeamUndoCounts;
+  room.gameState.lastUndoTeam = lastUndoTeam;
+  room.gameState.undoRequestedBy = null;
+  room.gameState.lastAction = `Jugada deshecha por ${room.players[requesterIdx].name} con el permiso del rival.`;
   
-  sendStateToAll();
+  sendStateToRoom(room);
 }
 
 function getCardDrawValue(card) {
@@ -144,7 +176,7 @@ function getSuitName(suit) {
   return names[suit] || suit;
 }
 
-function performSorteo(is4Player) {
+function performSorteoInRoom(room, is4Player) {
   const tempDeck = shuffle(createDeck());
   const drawnCards = [];
   const N = is4Player ? 4 : 2;
@@ -164,10 +196,10 @@ function performSorteo(is4Player) {
   }
 
   let actionText = 'Sorteo inicial: ';
-  const cardStrings = players.map((p, idx) => {
+  const cardStrings = room.players.map((p, idx) => {
     return `${p.name} sacó el ${drawnCards[idx].rank} de ${getSuitName(drawnCards[idx].suit)}`;
   });
-  actionText += cardStrings.join(', ') + `. Gana ${players[w].name} y sale de mano (Sur).`;
+  actionText += cardStrings.join(', ') + `. Gana ${room.players[w].name} y sale de mano (Sur).`;
 
   if (is4Player) {
     const seats = new Array(4);
@@ -176,56 +208,56 @@ function performSorteo(is4Player) {
     const winnerTeam = team1.includes(w) ? team1 : team2;
     const loserTeam = team1.includes(w) ? team2 : team1;
 
-    seats[0] = players[w]; // Sur
-    seats[2] = players[winnerTeam.find(idx => idx !== w)]; // Norte
+    seats[0] = room.players[w]; // Sur
+    seats[2] = room.players[winnerTeam.find(idx => idx !== w)]; // Norte
 
-    // De la pareja perdedora, el de mayor carta va a Este (1) y el menor a Oeste (3)
     const loserA = loserTeam[0];
     const loserB = loserTeam[1];
     if (values[loserA] > values[loserB]) {
-      seats[1] = players[loserA];
-      seats[3] = players[loserB];
+      seats[1] = room.players[loserA];
+      seats[3] = room.players[loserB];
     } else {
-      seats[1] = players[loserB];
-      seats[3] = players[loserA];
+      seats[1] = room.players[loserB];
+      seats[3] = room.players[loserA];
     }
 
-    players = [...seats];
-    actionText += ` Mesa de juego: Sur: ${players[0].name} (inicia), Este: ${players[1].name}, Norte: ${players[2].name}, Oeste: ${players[3].name}.`;
+    room.players = [...seats];
+    actionText += ` Mesa de juego: Sur: ${room.players[0].name} (inicia), Este: ${room.players[1].name}, Norte: ${room.players[2].name}, Oeste: ${room.players[3].name}.`;
   } else {
     // 2 jugadores
     const seats = new Array(2);
-    seats[0] = players[w];
-    seats[1] = players[1 - w];
-    players = [...seats];
+    seats[0] = room.players[w];
+    seats[1] = room.players[1 - w];
+    room.players = [...seats];
   }
 
   return actionText;
 }
 
-// Envía el estado de juego sanitizado a cada jugador para evitar trampas
-function sendStateToAll() {
-  if (!gameState) return;
+// Envía el estado sanitizado solo a los jugadores de esta sala específica
+function sendStateToRoom(room) {
+  if (!room || !room.gameState) return;
 
-  players.forEach((player, index) => {
-    if (player.socketId && player.socketId !== 'bot-socket') {
-      const sanitized = getSanitizedState(gameState, index);
+  room.players.forEach((player, index) => {
+    if (player.socketId && player.socketId !== 'bot-socket' && !player.socketId.startsWith('bot-socket-')) {
+      const sanitized = getSanitizedStateForRoom(room, index);
       io.to(player.socketId).emit('game-state', {
         gameState: sanitized,
         playerIndex: index,
-        lobbyPlayers: players.map(p => p.name)
+        lobbyPlayers: room.players.map(p => p.name),
+        roomId: room.id
       });
     }
   });
 
-  // Chequear si es el turno del bot
-  checkAndTriggerBotTurn();
+  // Chequear si es el turno del bot en esta sala
+  checkAndTriggerBotTurnInRoom(room);
 }
 
-function getSanitizedState(state, playerIndex) {
+function getSanitizedStateForRoom(room, playerIndex) {
+  const state = room.gameState;
   if (!state) return null;
   
-  // Sanitizar jugadores: ocultar las cartas en mano y mapear melds compartidos
   const sanitizedPlayers = state.players.map((p, idx) => {
     const teamOwner = getTeamOwnerIndex(idx, state.is4Player);
     const teamMelds = state.players[teamOwner].melds;
@@ -234,8 +266,6 @@ function getSanitizedState(state, playerIndex) {
       return { ...p, melds: teamMelds };
     }
 
-    // Ocultar cartas de la mano del rival o compañero durante el transcurso del juego
-    // (Para la IA incluimos devHand con las cartas reales para habilitar el Modo Desarrollo en el cliente)
     return {
       ...p,
       hand: new Array(p.hand.length).fill({ id: 'hidden', isHidden: true }),
@@ -244,919 +274,24 @@ function getSanitizedState(state, playerIndex) {
     };
   });
 
-  // Ocultar mazo de robo (solo mandar el contador)
   const drawPileCount = state.drawPile.length;
 
   return {
     ...state,
     drawPile: new Array(drawPileCount).fill({ id: 'hidden', isHidden: true }),
-    // Ocultar cartas de los muertos si no han sido tomados
-    mortos: state.mortos.map((m, idx) => {
+    mortos: state.mortos.map((m) => {
       if (!m) return null;
       return new Array(m.length).fill({ id: 'hidden', isHidden: true });
     }),
     players: sanitizedPlayers,
-    scores: globalScores
+    scores: room.globalScores,
+    roomId: room.id
   };
 }
 
-io.on('connection', (socket) => {
-  console.log(`Cliente conectado: ${socket.id}`);
-
-  // Enviar información de lobby al conectarse
-  socket.emit('lobby-info', {
-    localIp: LOCAL_IP,
-    players: players.map(p => p.name)
-  });
-
-  // Unirse al lobby y configurar partida
-  socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player }) => {
-    // Si la partida anterior ya finalizó, limpiar el estado para empezar una nueva
-    if (gameState && gameState.status === 'finished') {
-      console.log('La partida anterior ya finalizó. Limpiando estado para iniciar una nueva sala.');
-      players = [];
-      gameState = null;
-      globalScores = [0, 0];
-    }
-
-    // Si no hay otros humanos conectados, y cambian la configuración (2P vs 4P o Bots), reiniciar el lobby
-    const otherActiveHumans = players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
-    if (otherActiveHumans.length === 0) {
-      const is4PVal = is4Player !== undefined ? !!is4Player : is4PlayerSetting;
-      const isBotVal = isAgainstBot !== undefined ? !!isAgainstBot : isAgainstBotSetting;
-      if (is4PlayerSetting !== is4PVal || isAgainstBotSetting !== isBotVal) {
-        console.log('Las configuraciones del lobby cambiaron y no hay otros humanos conectados. Reseteando lobby.');
-        players = [];
-        gameState = null;
-        globalScores = [0, 0];
-      }
-    }
-
-    // Si hay una limpieza programada en curso, cancelarla ya que el jugador regresó
-    if (cleanupTimeout) {
-      console.log(`Jugador regresó (${name}). Cancelando limpieza diferida del juego.`);
-      clearTimeout(cleanupTimeout);
-      cleanupTimeout = null;
-    }
-
-    if (requiredCanastras) {
-      requiredCanastrasSetting = requiredCanastras === 2 ? 2 : 1;
-    }
-    if (targetScore) {
-      targetScoreSetting = Number(targetScore) || 3000;
-    }
-    if (is4Player !== undefined) {
-      is4PlayerSetting = !!is4Player;
-    }
-    if (isAgainstBot !== undefined) {
-      isAgainstBotSetting = !!isAgainstBot;
-    }
-
-    const maxPlayers = is4PlayerSetting ? 4 : 2;
-
-    if (isAgainstBotSetting) {
-      if (is4PlayerSetting) {
-        // Modo 4 jugadores con PC: Necesitamos 2 humanos.
-        // El líder es players[0] (Humano 1) y players[1] (Humano 2).
-        // Las computadoras ocupan players[2] y players[3].
-        const existingIndex = players.findIndex(p => p.name === name);
-        if (existingIndex !== -1) {
-          players[existingIndex].socketId = socket.id;
-          console.log(`Humano se reconectó a partida 4P contra PC: ${name}`);
-        } else {
-          const humanCount = players.filter(p => !p.isBot).length;
-          if (humanCount < 2) {
-            // Eliminar bots temporales si había, para agregar en orden
-            players = players.filter(p => !p.isBot);
-            players.push({ socketId: socket.id, name });
-            console.log(`Humano ${players.length} unido al lobby 4P contra PC: ${name}`);
-          } else {
-            socket.emit('error-message', 'La partida contra la PC está llena (ya hay 2 humanos jugando).');
-            return;
-          }
-        }
-        
-        // Si ya hay 2 humanos, rellenar los otros 2 slots con bots y arrancar
-        const activeHumans = players.filter(p => !p.isBot);
-        if (activeHumans.length === 2) {
-          players = [
-            activeHumans[0],
-            activeHumans[1],
-            { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
-            { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
-          ];
-        }
-      } else {
-        // Modo 2 jugadores con PC (Humano vs Bot)
-        const isReconnecting = gameState && players[0] && players[0].name === name && players[1] && players[1].isBot;
-
-        if (isReconnecting) {
-          players[0].socketId = socket.id;
-          console.log(`Jugador se reconectó a su partida contra la PC: ${name}`);
-        } else {
-          players = [
-            { socketId: socket.id, name },
-            { socketId: 'bot-socket', name: 'Computadora (IA)', isBot: true }
-          ];
-          gameState = null; // Forzar reinicio del juego
-          globalScores = [0, 0];
-          isBotThinking = false;
-          console.log(`Partida contra la PC iniciada para ${name}`);
-        }
-      }
-    } else {
-      // Modo multijugador humano completo
-      const existingIndex = players.findIndex(p => p.socketId === socket.id);
-      
-      if (existingIndex !== -1) {
-        players[existingIndex].name = name;
-      } else {
-        const sameNameIndex = players.findIndex(p => p.name === name);
-        if (sameNameIndex !== -1) {
-          players[sameNameIndex].socketId = socket.id;
-          console.log(`Jugador reconectado por nombre: ${name} (${socket.id})`);
-        } else {
-          const disconnectedIndex = players.findIndex(p => !p.socketId && !p.isBot);
-          if (disconnectedIndex !== -1) {
-            players[disconnectedIndex] = { socketId: socket.id, name };
-            console.log(`Jugador ocupó slot desconectado: ${name} (${socket.id})`);
-          } else if (players.length < maxPlayers) {
-            players.push({ socketId: socket.id, name });
-            console.log(`Jugador nuevo unido: ${name} (${socket.id})`);
-          } else {
-            socket.emit('error-message', `El juego está lleno (ya hay ${maxPlayers} jugadores activos).`);
-            return;
-          }
-        }
-      }
-    }
-
-    // Emitir lista de jugadores a todos
-    io.emit('lobby-update', players.map(p => p.name));
-
-    // Iniciar el juego si ya se llenaron los slots correspondientes
-    const activeHumansCount = players.filter(p => !p.isBot).length;
-    const requiredHumans = (isAgainstBotSetting && is4PlayerSetting) ? 2 : (isAgainstBotSetting ? 1 : maxPlayers);
-    const allSocketsReady = players.filter(p => !p.isBot).every(p => p.socketId);
-
-    if (players.length === maxPlayers && activeHumansCount === requiredHumans && allSocketsReady) {
-      if (!gameState) {
-        // Crear estado inicial
-        gameState = initGame(is4PlayerSetting);
-        
-        // Sorteo inicial con cartas físicas y asignación de asientos
-        const sorteoActionText = performSorteo(is4PlayerSetting);
-        
-        // El ganador del sorteo (index 0 tras performSorteo) sale de mano
-        gameState.starterIndex = 0;
-        gameState.turn = 0;
-
-        // Asignar nombres en gameState a partir de players ordenados por el sorteo
-        for (let i = 0; i < maxPlayers; i++) {
-          gameState.players[i].name = players[i].name;
-          if (players[i].isBot) {
-            gameState.players[i].isBot = true;
-          }
-        }
-
-        gameState.requiredCanastras = requiredCanastrasSetting;
-        gameState.targetScore = targetScoreSetting;
-        globalScores = [0, 0];
-        gameState.scores = globalScores;
-        gameState.lastAction = `¡Comienza el juego! ${sorteoActionText}`;
-
-        // Snapshot inicial del primer turno
-        const { turnStartSnapshot, ...snapshotData } = gameState;
-        gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
-
-      } else {
-        // En caso de reconexión, sincronizar nombres de sockets activos
-        for (let i = 0; i < maxPlayers; i++) {
-          if (players[i]) {
-            gameState.players[i].name = players[i].name;
-          }
-        }
-      }
-      sendStateToAll();
-    } else {
-      io.emit('lobby-update', players.map(p => p.name));
-    }
-  });
-  // Robar carta del mazo
-  socket.on('draw-card', () => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'No es tu turno.');
-      return;
-    }
-
-    if (gameState.turnState !== 'draw') {
-      socket.emit('error-message', 'Ya robaste carta en este turno.');
-      return;
-    }
-
-    if (gameState.drawPile.length === 0) {
-      // Si se acaba el mazo de robo, termina la ronda y se calculan puntos
-      gameState.status = 'finished';
-      gameState.turnState = 'confirm-scores';
-      gameState.lastAction = 'El mazo de robo se ha agotado. Fin de la ronda. Esperando confirmación de puntos.';
-      gameState.roundScores = calculateRoundScores(gameState);
-      sendStateToAll();
-      return;
-    }
-
-    // Guardar snapshot de inicio de turno para permitir deshacer
-    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
-      const { turnStartSnapshot, ...snapshotData } = gameState;
-      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
-    }
-
-    const card = gameState.drawPile.pop();
-    gameState.players[pIdx].hand.push(card);
-    gameState.turnState = 'play';
-    
-    if (gameState.isFirstTurn) {
-      gameState.firstDrawnCardId = card.id;
-      gameState.lastAction = `${gameState.players[pIdx].name} robó la primera carta de la partida. Debe decidir si conservarla o descartarla y robar otra.`;
-    } else {
-      gameState.lastAction = `${gameState.players[pIdx].name} robó del mazo.`;
-    }
-    
-    sendStateToAll();
-  });
-
-  // Robar todo el pozo de descarte
-  socket.on('draw-discard', () => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'No es tu turno.');
-      return;
-    }
-
-    if (gameState.turnState !== 'draw') {
-      socket.emit('error-message', 'Ya robaste carta en este turno.');
-      return;
-    }
-
-    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
-    
-    // Regla del Muerto en Parejas: El que levantó el muerto no puede robar del pozo.
-    if (gameState.is4Player && gameState.mortosTaken[teamIdx] === pIdx) {
-      socket.emit('error-message', 'Como levantaste el Muerto, estás bloqueado de robar del pozo de descartes. Debes robar del mazo.');
-      return;
-    }
-
-    const teamMelds = gameState.players[teamIdx].melds;
-    let totalMeldPoints = 0;
-    teamMelds.forEach(meld => {
-      meld.forEach(c => {
-        totalMeldPoints += CARD_VALUES[c.rank] || 0;
-      });
-    });
-
-    if (totalMeldPoints < 30) {
-      socket.emit('error-message', `No puedes levantar del pozo hasta haber sumado al menos 30 puntos en tus juegos bajados (actualmente tienes ${totalMeldPoints} pts en mesa).`);
-      return;
-    }
-
-    if (gameState.discardPile.length === 0) {
-      socket.emit('error-message', 'El pozo de descarte está vacío.');
-      return;
-    }
-
-    // Guardar snapshot de inicio de turno para permitir deshacer
-    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
-      const { turnStartSnapshot, ...snapshotData } = gameState;
-      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
-    }
-
-    // Agregar todas las cartas del pozo a la mano del jugador
-    const count = gameState.discardPile.length;
-    gameState.players[pIdx].hand.push(...gameState.discardPile);
-    gameState.discardPile = [];
-    
-    gameState.turnState = 'play';
-    gameState.lastAction = `${gameState.players[pIdx].name} recogió el pozo entero (${count} cartas).`;
-    
-    if (gameState.isFirstTurn) {
-      gameState.isFirstTurn = false;
-      gameState.firstDrawnCardId = null;
-    }
-    
-    sendStateToAll();
-  });
-
-  // Bajar un juego nuevo (secuencia)
-  socket.on('meld-sequence', ({ cards }) => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'No es tu turno.');
-      return;
-    }
-
-    if (gameState.turnState !== 'play') {
-      socket.emit('error-message', 'Debes robar una carta antes de bajar juegos.');
-      return;
-    }
-
-    // Verificar que el jugador tenga estas cartas en su mano
-    const hand = gameState.players[pIdx].hand;
-    const hasAllCards = cards.every(cardToFind => 
-      hand.some(handCard => handCard.id === cardToFind.id)
-    );
-
-    if (!hasAllCards) {
-      socket.emit('error-message', 'No tienes esas cartas en tu mano.');
-      return;
-    }
-
-    // Validar juego con las reglas (secuencia o grupo)
-    const result = validateMeld(cards);
-    if (!result.valid) {
-      socket.emit('error-message', `Juego inválido: ${result.error}`);
-      return;
-    }
-
-    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
-    const player = gameState.players[pIdx];
-    const teamPlayer = gameState.players[teamIdx];
-
-    // Restricción de cartas en mano al bajar juego
-    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
-    const existingCanastras = teamPlayer.melds.filter(m => m.length >= 7).length;
-    // Si el juego que estamos bajando ahora tiene 7 o más cartas, se considera una nueva canastra completada
-    const newCanastraCreated = result.cards && result.cards.length >= 7 ? 1 : 0;
-    const totalCanastrasAfter = existingCanastras + newCanastraCreated;
-    const requiredCanastras = gameState.requiredCanastras || 1;
-    const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
-    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
-
-    if (hand.length - cards.length < minCardsHand) {
-      if (minCardsHand === 2) {
-        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
-      } else {
-        socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
-      }
-      return;
-    }
-
-    // Quitar cartas de la mano
-    cards.forEach(cardToRem => {
-      const idx = hand.findIndex(hc => hc.id === cardToRem.id);
-      if (idx !== -1) hand.splice(idx, 1);
-    });
-
-    // Añadir meld ordenado al paño compartido del equipo
-    gameState.players[teamIdx].melds.push(result.cards);
-    gameState.lastAction = `${player.name} bajó juego: ${result.clean ? 'Limpio' : 'Sucio'} (${cards.length} cartas).`;
-
-    // Comprobar si toma muerto directo
-    const tookMortoDirect = checkMortoDirect(pIdx);
-    if (!tookMortoDirect) {
-      checkDirectBatida(pIdx);
-    }
-
-    sendStateToAll();
-  });
-
-  // Acoplar cartas a un juego ya existente
-  socket.on('append-to-meld', ({ meldIndex, cards }) => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'No es tu turno.');
-      return;
-    }
-
-    if (gameState.turnState !== 'play') {
-      socket.emit('error-message', 'Debes robar una carta antes de bajar juegos.');
-      return;
-    }
-
-    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
-    const player = gameState.players[pIdx];
-    const teamPlayer = gameState.players[teamIdx];
-    
-    if (!teamPlayer.melds[meldIndex]) {
-      socket.emit('error-message', 'Juego seleccionado inválido.');
-      return;
-    }
-
-    // Verificar que el jugador tenga estas cartas
-    const hand = player.hand;
-    const hasAllCards = cards.every(cardToFind => 
-      hand.some(handCard => handCard.id === cardToFind.id)
-    );
-
-    if (!hasAllCards) {
-      socket.emit('error-message', 'No tienes esas cartas en tu mano.');
-      return;
-    }
-
-    // Combinar juego existente con nuevas cartas
-    const currentMeld = teamPlayer.melds[meldIndex];
-    if (!currentMeld) return;
-    const combined = [...currentMeld, ...cards];
-
-    const result = validateMeld(combined);
-    if (!result.valid) {
-      socket.emit('error-message', `Movimiento inválido: ${result.error}`);
-      return;
-    }
-
-    // Restricción de cartas en mano al acoplar
-    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
-    const existingCanastras = teamPlayer.melds.filter(m => m.length >= 7).length;
-    const wasCanastra = currentMeld.length >= 7;
-    const willBeCanastra = combined.length >= 7;
-    const netCanastraCreated = (willBeCanastra && !wasCanastra) ? 1 : 0;
-    const totalCanastrasAfter = existingCanastras + netCanastraCreated;
-    const requiredCanastras = gameState.requiredCanastras || 1;
-    const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
-    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
-
-    if (hand.length - cards.length < minCardsHand) {
-      if (minCardsHand === 2) {
-        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
-      } else {
-        socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
-      }
-      return;
-    }
-
-    // Quitar cartas de la mano
-    cards.forEach(cardToRem => {
-      const idx = hand.findIndex(hc => hc.id === cardToRem.id);
-      if (idx !== -1) hand.splice(idx, 1);
-    });
-
-    // Reemplazar meld con la secuencia combinada y ordenada al paño compartido
-    teamPlayer.melds[meldIndex] = result.cards;
-    gameState.lastAction = `${player.name} acopló cartas a su juego.`;
-
-    // Comprobar si toma muerto directo
-    const tookMortoDirect = checkMortoDirect(pIdx);
-    if (!tookMortoDirect) {
-      checkDirectBatida(pIdx);
-    }
-
-    sendStateToAll();
-  });
-
-  // Descartar carta (termina el turno)
-  socket.on('discard-card', ({ card }) => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'No es tu turno.');
-      return;
-    }
-
-    if (gameState.turnState !== 'play') {
-      socket.emit('error-message', 'Debes robar antes de descartar.');
-      return;
-    }
-
-    if (gameState.isFirstTurn) {
-      gameState.isFirstTurn = false;
-      gameState.firstDrawnCardId = null;
-    }
-
-    const hand = gameState.players[pIdx].hand;
-    const cardIdx = hand.findIndex(hc => hc.id === card.id);
-
-    if (cardIdx === -1) {
-      socket.emit('error-message', 'No tienes esa carta en tu mano.');
-      return;
-    }
-
-    // Validación para BATER (ganar la ronda)
-    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
-    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
-    const teamMelds = gameState.players[teamIdx].melds;
-    const canastrasCount = teamMelds.filter(m => m.length >= 7).length;
-    const requiredCanastras = gameState.requiredCanastras || 1;
-
-    if (hand.length === 1) {
-      if (hasTakenMorto && canastrasCount < requiredCanastras) {
-        socket.emit('error-message', `No puedes terminar (bater) sin tener al menos ${requiredCanastras} ${requiredCanastras === 1 ? 'canasta' : 'canastas'}. (Tenés ${canastrasCount}).`);
-        return;
-      }
-
-      if (hasTakenMorto && canastrasCount >= requiredCanastras) {
-        // Bate y finaliza la ronda visualmente!
-        hand.splice(cardIdx, 1);
-        gameState.discardPile.push(card);
-        gameState.status = 'finished-visual';
-        gameState.winner = pIdx;
-        gameState.turnState = 'match-over-visual';
-        gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido la mano!`;
-        gameState.cutterIndex = pIdx;
-        
-        // Calcular puntuaciones
-        gameState.roundScores = calculateRoundScores(gameState);
-        
-        sendStateToAll();
-        return;
-      }
-    }
-
-    // Quitar de la mano y poner en el pozo
-    hand.splice(cardIdx, 1);
-    gameState.discardPile.push(card);
-    gameState.lastAction = `${gameState.players[pIdx].name} descartó ${card.rank} de ${card.suit}.`;
-
-    // Manejo de Muerto Indirecto (se quedó sin cartas tras el descarte)
-    const tookMortoIndirect = checkMortoIndirect(pIdx);
-
-    // Cambiar de turno
-    const nextTurn = gameState.is4Player ? (gameState.turn + 1) % 4 : (gameState.turn === 0 ? 1 : 0);
-    startPlayerTurn(nextTurn);
-
-    sendStateToAll();
-  });
-
-  // Mostrar la planilla de puntajes al hacer clic en "Ver Puntaje" tras el corte
-  socket.on('show-scores-sheet', () => {
-    if (!gameState || gameState.status !== 'finished-visual') return;
-    
-    gameState.status = 'finished';
-    gameState.turnState = 'confirm-scores';
-    sendStateToAll();
-  });
-
-  // Conservar la primera carta robada
-  socket.on('keep-first-card', () => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || !gameState.isFirstTurn || gameState.turn !== pIdx) return;
-
-    gameState.isFirstTurn = false;
-    gameState.firstDrawnCardId = null;
-    gameState.lastAction = `${gameState.players[pIdx].name} conservó la carta robada en su primer turno.`;
-    
-    sendStateToAll();
-  });
-
-  // Rechazar la primera carta robada y habilitar volver a robar
-  socket.on('reject-first-card', () => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || !gameState.isFirstTurn || gameState.turn !== pIdx) return;
-
-    const hand = gameState.players[pIdx].hand;
-    const cardId = gameState.firstDrawnCardId;
-    const cardIdx = hand.findIndex(c => c.id === cardId);
-    
-    if (cardIdx !== -1) {
-      const rejectedCard = hand[cardIdx];
-      
-      // Quitar de la mano
-      hand.splice(cardIdx, 1);
-      
-      // Poner en el pozo de descarte
-      gameState.discardPile.push(rejectedCard);
-      
-      gameState.lastAction = `${gameState.players[pIdx].name} rechazó la carta robada, la tiró al pozo y debe volver a robar del mazo.`;
-    }
-
-    gameState.isFirstTurn = false;
-    gameState.firstDrawnCardId = null;
-    gameState.turnState = 'draw'; // Habilitar volver a robar manualmente del mazo
-    
-    sendStateToAll();
-  });
-
-  // Reiniciar ronda (manteniendo puntajes globales acumulados)
-  socket.on('restart-round', () => {
-    if (!gameState) return;
-    
-    isBotThinking = false; // Resetear IA
-    const currentRequiredCanastras = gameState.requiredCanastras || 1;
-    const currentTargetScore = gameState.targetScore || 3000;
-    const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
-    const maxPlayers = is4PlayerSetting ? 4 : 2;
-    const nextStarter = (previousStarter + 1) % maxPlayers;
-
-    // Inicializar nueva ronda
-    const newGame = initGame(is4PlayerSetting);
-    newGame.starterIndex = nextStarter;
-    
-    for (let i = 0; i < maxPlayers; i++) {
-      newGame.players[i].name = players[i] ? players[i].name : `Jugador ${i + 1}`;
-      if (players[i] && players[i].isBot) {
-        newGame.players[i].isBot = true;
-      }
-    }
-    newGame.requiredCanastras = currentRequiredCanastras;
-    newGame.targetScore = currentTargetScore;
-    
-    gameState = newGame;
-    gameState.scores = globalScores;
-    gameState.lastAction = `Nueva ronda iniciada. Turno de ${gameState.players[nextStarter]?.name || 'Jugador'}`;
-    startPlayerTurn(nextStarter);
-    
-    sendStateToAll();
-  });
-
-  // Reiniciar partida por completo (resetea puntajes)
-  socket.on('reset-game', () => {
-    globalScores = [0, 0];
-    isBotThinking = false; // Resetear IA
-    const currentRequiredCanastras = gameState ? gameState.requiredCanastras : requiredCanastrasSetting;
-    const currentTargetScore = gameState ? gameState.targetScore : targetScoreSetting;
-    const maxPlayers = is4PlayerSetting ? 4 : 2;
-    
-    gameState = initGame(is4PlayerSetting);
-    
-    // Sorteo inicial con cartas físicas y asignación de asientos
-    const sorteoActionText = performSorteo(is4PlayerSetting);
-    gameState.starterIndex = 0;
-
-    for (let i = 0; i < maxPlayers; i++) {
-      gameState.players[i].name = players[i].name;
-      if (players[i].isBot) {
-        gameState.players[i].isBot = true;
-      }
-    }
-    gameState.requiredCanastras = currentRequiredCanastras;
-    gameState.targetScore = currentTargetScore;
-    gameState.scores = globalScores;
-    gameState.lastAction = `Partida reiniciada. ${sorteoActionText}`;
-    startPlayerTurn(0);
-    
-    sendStateToAll();
-  });
-
-  // Cambiar meta de puntos en medio de la partida
-  socket.on('change-target-score', ({ newTargetScore }) => {
-    if (!gameState) return;
-    const scoreVal = parseInt(newTargetScore, 10);
-    if (isNaN(scoreVal) || scoreVal <= 0) {
-      socket.emit('error-message', 'La meta de puntos debe ser un número válido mayor a 0.');
-      return;
-    }
-
-    const previousTarget = gameState.targetScore || 3000;
-    gameState.targetScore = scoreVal;
-    
-    // Obtener el jugador que realizó la acción
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    const changerName = pIdx !== -1 ? players[pIdx].name : 'Un jugador';
-    
-    gameState.lastAction = `${changerName} cambió la meta de puntos de ${previousTarget} a ${scoreVal} pts.`;
-    sendStateToAll();
-  });
-
-  // Solicitar deshacer la jugada
-  socket.on('request-undo', () => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-    
-    const maxPlayers = gameState.is4Player ? 4 : 2;
-    const isPrevPlayer = pIdx === (gameState.is4Player 
-      ? (gameState.turn - 1 + 4) % 4 
-      : (gameState.turn === 0 ? 1 : 0)
-    );
-
-    const isValidUndoRequest = (
-      // Caso 1: Es su turno y ya robó (está jugando)
-      (gameState.turn === pIdx && gameState.turnState !== 'draw') ||
-      // Caso 2: Es el jugador anterior y el actual no ha robado aún
-      (isPrevPlayer && gameState.turnState === 'draw')
-    );
-
-    if (!isValidUndoRequest) {
-      if (gameState.turn === pIdx && gameState.turnState === 'draw') {
-        socket.emit('error-message', 'No puedes volver atrás un turno que aún no ha comenzado (debes robar primero).');
-      } else {
-        socket.emit('error-message', 'No puedes solicitar deshacer en este momento.');
-      }
-      return;
-    }
-
-    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
-    const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
-    
-    // Validar límites de deshacer
-    const uses = gameState.teamUndoCounts[teamIdx];
-    if (uses >= 2) {
-      socket.emit('error-message', 'Ya has alcanzado el límite máximo de 2 retrocesos de jugada por partida.');
-      return;
-    }
-
-    // Regla de alternancia
-    if (uses === 1) {
-      const oppUses = gameState.teamUndoCounts[opponentTeamIdx];
-      if (oppUses === 0) {
-        socket.emit('error-message', 'No puedes volver a solicitar deshacer hasta que la pareja rival haya solicitado y usado al menos un retroceso.');
-        return;
-      }
-    }
-
-    // Obtener oponentes
-    const opponentIndices = gameState.is4Player
-      ? (teamIdx === 0 ? [1, 3] : [0, 2])
-      : [1 - pIdx];
-    
-    const opponentHumans = opponentIndices.map(idx => players[idx]).filter(p => p && !p.isBot && p.socketId);
-    
-    // Si no hay rivales humanos (ej. modo bot) se auto-aprueba de inmediato
-    if (opponentHumans.length === 0) {
-      applyUndo(pIdx, teamIdx);
-      return;
-    }
-
-    // Si hay rivales humanos, cambiar estado a esperando confirmación del rival y avisar a todos
-    gameState.undoRequestedBy = pIdx;
-    sendStateToAll();
-  });
-
-  // Responder a la solicitud de deshacer jugada
-  socket.on('respond-undo', ({ accept }) => {
-    const pIdx = players.findIndex(p => p.socketId === socket.id);
-    if (pIdx === -1 || !gameState || gameState.status !== 'playing') return;
-
-    const requesterIdx = gameState.undoRequestedBy;
-    if (requesterIdx === undefined || requesterIdx === null) return;
-
-    const requesterTeam = getTeamOwnerIndex(requesterIdx, gameState.is4Player);
-    const responderTeam = getTeamOwnerIndex(pIdx, gameState.is4Player);
-
-    if (requesterTeam === responderTeam) return;
-
-    if (accept) {
-      applyUndo(requesterIdx, requesterTeam);
-    } else {
-      gameState.undoRequestedBy = null;
-      const requesterSocket = players[requesterIdx] ? players[requesterIdx].socketId : null;
-      if (requesterSocket) {
-        io.to(requesterSocket).emit('error-message', 'El rival ha rechazado tu solicitud de volver atrás.');
-      }
-      sendStateToAll();
-    }
-  });
-
-  // Simular corte/batida instantáneo (para pruebas/depuración - requiere clave)
-  socket.on('debug-simulate-batida', (payload) => {
-    const pass = typeof payload === 'string' ? payload : payload?.pass;
-    if (pass !== 'lom@lind@') {
-      socket.emit('error-message', 'Acceso denegado: clave de desarrollador incorrecta.');
-      return;
-    }
-    if (!gameState || gameState.status !== 'playing') return;
-
-    const pIdx = gameState.turn;
-    const hand = gameState.players[pIdx].hand;
-
-    // Obtener la última carta de la mano para descartarla, o usar una dummy si no tiene
-    const cardToDiscard = hand.length > 0 ? hand[hand.length - 1] : { id: 'dummy', rank: 'A', suit: 'H' };
-
-    if (hand.length > 0) {
-      hand.splice(hand.length - 1, 1);
-    }
-    
-    gameState.discardPile.push(cardToDiscard);
-    gameState.status = 'finished-visual';
-    gameState.winner = pIdx;
-    gameState.turnState = 'match-over-visual';
-    gameState.lastAction = `¡${gameState.players[pIdx].name} ha batido la mano (Simulación de depuración)!`;
-    gameState.cutterIndex = pIdx;
-
-    // Calcular puntuaciones
-    gameState.roundScores = calculateRoundScores(gameState);
-
-    sendStateToAll();
-  });
-
-  // Abandonar la partida explícitamente (abortar juego y limpiar lobby)
-  socket.on('leave-game', () => {
-    console.log(`Un jugador solicitó abandonar la partida: ${socket.id}`);
-    
-    // Si la partida está activa, notificar a los demás y resetear todo
-    if (gameState) {
-      io.emit('game-aborted', 'La partida fue cancelada porque un jugador la abandonó.');
-    }
-    
-    // Resetear lobby
-    players = [];
-    gameState = null;
-    globalScores = [0, 0];
-    isBotThinking = false;
-    if (cleanupTimeout) {
-      clearTimeout(cleanupTimeout);
-      cleanupTimeout = null;
-    }
-    
-    io.emit('lobby-update', []);
-  });
-
-  // Desconexión
-  socket.on('disconnect', () => {
-    console.log(`Cliente desconectado: ${socket.id}`);
-    const index = players.findIndex(p => p.socketId === socket.id);
-    if (index !== -1) {
-      if (!gameState) {
-        // Si el juego no ha empezado, sacarlo del lobby por completo
-        players.splice(index, 1);
-        console.log(`Jugador removido del lobby por desconexión antes de iniciar.`);
-      } else {
-        // Mantener al jugador en el lobby pero sin socketId activo (permitir reconexión)
-        players[index].socketId = null;
-      }
-      io.emit('lobby-update', players.map(p => p.name));
-    }
-
-    // Si no quedan jugadores humanos conectados, programar limpieza diferida (gracia de 15 segundos en caso de F5 o desconexión)
-    const activeHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot);
-    if (activeHumans.length === 0) {
-      console.log('Lobby vacío de humanos. Programando limpieza diferida en 15 segundos.');
-      if (cleanupTimeout) clearTimeout(cleanupTimeout);
-      cleanupTimeout = setTimeout(() => {
-        // Volver a verificar si sigue vacío antes de borrar
-        const stillNoHumans = players.filter(p => p.socketId && p.socketId !== 'bot-socket' && !p.isBot).length === 0;
-        if (stillNoHumans) {
-          console.log('Expiró el tiempo de espera (15 segundos). Limpiando estado de Buraco.');
-          players = [];
-          gameState = null;
-          globalScores = [0, 0];
-          isBotThinking = false;
-        }
-        cleanupTimeout = null;
-      }, 15000); // 15 segundos de gracia
-    }
-  });
-
-  // Confirmar y registrar los puntajes de la ronda
-  socket.on('confirm-round-scores', ({ roundBreakdown }) => {
-    if (!gameState || gameState.status !== 'finished') return;
-
-    const p0Total = Number(roundBreakdown.p0.roundTotal);
-    const p1Total = Number(roundBreakdown.p1.roundTotal);
-
-    globalScores[0] += p0Total;
-    globalScores[1] += p1Total;
-
-    // Guardar en la planilla
-    const roundNum = gameState.roundHistory.length + 1;
-    gameState.roundHistory.push({
-      round: roundNum,
-      breakdown: roundBreakdown,
-      totals: [p0Total, p1Total],
-      accumulated: [...globalScores]
-    });
-
-    // Verificar si alguien alcanzó el objetivo de puntos
-    const targetScore = gameState.targetScore || targetScoreSetting || 3000;
-    if (globalScores[0] >= targetScore || globalScores[1] >= targetScore) {
-      gameState.status = 'finished';
-      gameState.turnState = 'match-over';
-      gameState.scores = [...globalScores];
-      gameState.winner = globalScores[0] >= targetScore 
-        ? (globalScores[1] >= targetScore ? (globalScores[0] >= globalScores[1] ? 0 : 1) : 0) 
-        : 1;
-      gameState.lastAction = `¡Partida finalizada! Ganador: ${gameState.players[gameState.winner].name} con ${globalScores[gameState.winner]} puntos totales.`;
-      
-      sendStateToAll();
-      return;
-    }
-
-    // Iniciar siguiente ronda inmediatamente
-    const currentRequiredCanastras = gameState.requiredCanastras || 1;
-    const currentHistory = [...gameState.roundHistory];
-    const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
-    const maxPlayers = is4PlayerSetting ? 4 : 2;
-    const nextStarter = (previousStarter + 1) % maxPlayers;
-
-    const newGame = initGame(is4PlayerSetting);
-    newGame.starterIndex = nextStarter;
-    
-    for (let i = 0; i < maxPlayers; i++) {
-      newGame.players[i].name = players[i] ? players[i].name : `Jugador ${i + 1}`;
-      if (players[i] && players[i].isBot) {
-        newGame.players[i].isBot = true;
-      }
-    }
-    newGame.requiredCanastras = currentRequiredCanastras;
-    newGame.roundHistory = currentHistory;
-    newGame.scores = [...globalScores];
-    newGame.lastAction = `Ronda ${roundNum} registrada. ¡Comienza la ronda ${roundNum + 1}! Mano alternada: sale de mano ${newGame.players[nextStarter]?.name || 'Jugador'}.`;
-
-    gameState = newGame;
-    isBotThinking = false; // Resetear IA
-    startPlayerTurn(nextStarter);
-    sendStateToAll();
-  });
-});
-
-// Comprueba si el jugador batió directamente sin descarte (al quedarse con 0 cartas y tener canastra)
-function checkDirectBatida(pIdx) {
+function checkDirectBatidaInRoom(room, pIdx) {
+  const gameState = room.gameState;
+  if (!gameState) return false;
   const player = gameState.players[pIdx];
   const hand = player.hand;
   const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
@@ -1177,14 +312,14 @@ function checkDirectBatida(pIdx) {
   return false;
 }
 
-// Comprueba si el jugador se quedó sin cartas y debe recibir el Muerto Directo (sigue su turno)
-function checkMortoDirect(playerIdx) {
+function checkMortoDirectInRoom(room, playerIdx) {
+  const gameState = room.gameState;
+  if (!gameState) return false;
   const player = gameState.players[playerIdx];
   const teamIdx = getTeamOwnerIndex(playerIdx, gameState.is4Player);
   const hasTaken = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[teamIdx];
 
   if (player.hand.length === 0 && !hasTaken) {
-    // Si quedan muertos disponibles
     let mortoIdx = -1;
     if (gameState.mortos[0]) mortoIdx = 0;
     else if (gameState.mortos[1]) mortoIdx = 1;
@@ -1211,8 +346,9 @@ function checkMortoDirect(playerIdx) {
   return false;
 }
 
-// Comprueba si el jugador se quedó sin cartas tras el descarte y recibe el Muerto Indirecto (pasa turno)
-function checkMortoIndirect(playerIdx) {
+function checkMortoIndirectInRoom(room, playerIdx) {
+  const gameState = room.gameState;
+  if (!gameState) return false;
   const player = gameState.players[playerIdx];
   const teamIdx = getTeamOwnerIndex(playerIdx, gameState.is4Player);
   const hasTaken = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[teamIdx];
@@ -1243,6 +379,879 @@ function checkMortoIndirect(playerIdx) {
   }
   return false;
 }
+
+function checkAndTriggerBotTurnInRoom(room) {
+  if (!room || !room.gameState || room.gameState.status !== 'playing' || room.isBotThinking) return;
+
+  const botIdx = room.gameState.turn;
+  const activePlayer = room.players[botIdx];
+
+  if (activePlayer && activePlayer.isBot) {
+    room.isBotThinking = true;
+    if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+    room.botTurnTimeout = setTimeout(() => {
+      runBotTurnInRoom(room, botIdx);
+    }, 1500); // Demora simulando pensar
+  }
+}
+
+// ============================================================================
+// GESTIÓN DE EVENTOS DE SOCKET CON AISLAMIENTO POR SALA
+// ============================================================================
+
+io.on('connection', (socket) => {
+  console.log(`Cliente conectado: ${socket.id}`);
+
+  // Enviar información inicial del lobby
+  socket.emit('lobby-info', {
+    localIp: LOCAL_IP,
+    players: [],
+    roomId: 'mesa-1'
+  });
+
+  // Consultar estado de una sala específica desde el lobby
+  socket.on('get-lobby-info', ({ roomId }) => {
+    const cleanId = (roomId || 'mesa-1').trim().toLowerCase();
+    const room = rooms.get(cleanId);
+    socket.emit('lobby-update', {
+      roomId: cleanId,
+      players: room ? room.players.filter(p => !p.isBot).map(p => p.name) : []
+    });
+  });
+
+  // Unirse al lobby de una sala y configurar partida
+  socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player, roomId }) => {
+    const cleanRoomId = (roomId || 'mesa-1').trim().toLowerCase();
+    const room = getOrCreateRoom(cleanRoomId);
+    socket.roomId = cleanRoomId;
+    socket.join(cleanRoomId);
+
+    // Si la partida anterior ya finalizó en esta sala, limpiar el estado para empezar una nueva
+    if (room.gameState && room.gameState.status === 'finished') {
+      console.log(`La partida anterior en sala ${cleanRoomId} ya finalizó. Limpiando sala.`);
+      room.players = [];
+      room.gameState = null;
+      room.globalScores = [0, 0];
+      room.isBotThinking = false;
+    }
+
+    // Si no hay otros humanos conectados en esta sala, y cambian la configuración, reiniciar sala
+    const otherActiveHumans = room.players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
+    if (otherActiveHumans.length === 0) {
+      const is4PVal = is4Player !== undefined ? !!is4Player : room.is4PlayerSetting;
+      const isBotVal = isAgainstBot !== undefined ? !!isAgainstBot : room.isAgainstBotSetting;
+      if (room.is4PlayerSetting !== is4PVal || room.isAgainstBotSetting !== isBotVal) {
+        console.log(`Configuración cambiada en sala ${cleanRoomId}. Reiniciando sala.`);
+        room.players = [];
+        room.gameState = null;
+        room.globalScores = [0, 0];
+        room.isBotThinking = false;
+      }
+    }
+
+    // Si hay una limpieza programada en curso para esta sala, cancelarla
+    if (room.cleanupTimeout) {
+      console.log(`Jugador regresó a sala ${cleanRoomId} (${name}). Cancelando limpieza diferida.`);
+      clearTimeout(room.cleanupTimeout);
+      room.cleanupTimeout = null;
+    }
+
+    if (requiredCanastras) {
+      room.requiredCanastrasSetting = requiredCanastras === 2 ? 2 : 1;
+    }
+    if (targetScore) {
+      room.targetScoreSetting = Number(targetScore) || 3000;
+    }
+    if (is4Player !== undefined) {
+      room.is4PlayerSetting = !!is4Player;
+    }
+    if (isAgainstBot !== undefined) {
+      room.isAgainstBotSetting = !!isAgainstBot;
+    }
+
+    const maxPlayers = room.is4PlayerSetting ? 4 : 2;
+
+    if (room.isAgainstBotSetting) {
+      if (room.is4PlayerSetting) {
+        const existingIndex = room.players.findIndex(p => p.name === name);
+        if (existingIndex !== -1) {
+          room.players[existingIndex].socketId = socket.id;
+          console.log(`Humano se reconectó a sala 4P ${cleanRoomId}: ${name}`);
+        } else {
+          const humanCount = room.players.filter(p => !p.isBot).length;
+          if (humanCount < 2) {
+            room.players = room.players.filter(p => !p.isBot);
+            room.players.push({ socketId: socket.id, name });
+            console.log(`Humano ${room.players.length} unido a sala 4P ${cleanRoomId}: ${name}`);
+          } else {
+            socket.emit('error-message', 'La partida contra la PC en esta sala está llena (ya hay 2 humanos).');
+            return;
+          }
+        }
+        
+        const activeHumans = room.players.filter(p => !p.isBot);
+        if (activeHumans.length === 2) {
+          room.players = [
+            activeHumans[0],
+            activeHumans[1],
+            { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
+            { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
+          ];
+        }
+      } else {
+        // Modo 2 jugadores con PC
+        const isReconnecting = room.gameState && room.players[0] && room.players[0].name === name && room.players[1] && room.players[1].isBot;
+
+        if (isReconnecting) {
+          room.players[0].socketId = socket.id;
+          console.log(`Jugador se reconectó a su partida contra la PC en sala ${cleanRoomId}: ${name}`);
+        } else {
+          room.players = [
+            { socketId: socket.id, name },
+            { socketId: 'bot-socket', name: 'Computadora (IA)', isBot: true }
+          ];
+          room.gameState = null;
+          room.globalScores = [0, 0];
+          room.isBotThinking = false;
+          console.log(`Partida contra la PC iniciada en sala ${cleanRoomId} para ${name}`);
+        }
+      }
+    } else {
+      // Modo multijugador humano completo
+      const existingIndex = room.players.findIndex(p => p.socketId === socket.id);
+      if (existingIndex !== -1) {
+        room.players[existingIndex].name = name;
+      } else {
+        const sameNameIndex = room.players.findIndex(p => p.name === name);
+        if (sameNameIndex !== -1) {
+          room.players[sameNameIndex].socketId = socket.id;
+          console.log(`Jugador reconectado por nombre en sala ${cleanRoomId}: ${name}`);
+        } else {
+          const disconnectedIndex = room.players.findIndex(p => !p.socketId && !p.isBot);
+          if (disconnectedIndex !== -1) {
+            room.players[disconnectedIndex] = { socketId: socket.id, name };
+            console.log(`Jugador ocupó slot desconectado en sala ${cleanRoomId}: ${name}`);
+          } else if (room.players.length < maxPlayers) {
+            room.players.push({ socketId: socket.id, name });
+            console.log(`Jugador nuevo unido a sala ${cleanRoomId}: ${name}`);
+          } else {
+            socket.emit('error-message', `La sala ${cleanRoomId} está llena (ya hay ${maxPlayers} jugadores).`);
+            return;
+          }
+        }
+      }
+    }
+
+    // Emitir lista de jugadores a la sala
+    io.to(cleanRoomId).emit('lobby-update', { roomId: cleanRoomId, players: room.players.map(p => p.name) });
+
+    // Iniciar juego si se completaron los cupos
+    const activeHumansCount = room.players.filter(p => !p.isBot).length;
+    const requiredHumans = (room.isAgainstBotSetting && room.is4PlayerSetting) ? 2 : (room.isAgainstBotSetting ? 1 : maxPlayers);
+    const allSocketsReady = room.players.filter(p => !p.isBot).every(p => p.socketId);
+
+    if (room.players.length === maxPlayers && activeHumansCount === requiredHumans && allSocketsReady) {
+      if (!room.gameState) {
+        room.gameState = initGame(room.is4PlayerSetting);
+        const sorteoActionText = performSorteoInRoom(room, room.is4PlayerSetting);
+        
+        room.gameState.starterIndex = 0;
+        room.gameState.turn = 0;
+
+        for (let i = 0; i < maxPlayers; i++) {
+          room.gameState.players[i].name = room.players[i].name;
+          if (room.players[i].isBot) {
+            room.gameState.players[i].isBot = true;
+          }
+        }
+
+        room.gameState.requiredCanastras = room.requiredCanastrasSetting;
+        room.gameState.targetScore = room.targetScoreSetting;
+        room.globalScores = [0, 0];
+        room.gameState.scores = room.globalScores;
+        room.gameState.lastAction = `¡Comienza el juego en ${cleanRoomId.toUpperCase()}! ${sorteoActionText}`;
+
+        const { turnStartSnapshot, ...snapshotData } = room.gameState;
+        room.gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
+      } else {
+        for (let i = 0; i < maxPlayers; i++) {
+          if (room.players[i]) {
+            room.gameState.players[i].name = room.players[i].name;
+          }
+        }
+      }
+      sendStateToRoom(room);
+    } else {
+      io.to(cleanRoomId).emit('lobby-update', { roomId: cleanRoomId, players: room.players.map(p => p.name) });
+    }
+  });
+
+  // Robar carta del mazo
+  socket.on('draw-card', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.turn !== pIdx) {
+      socket.emit('error-message', 'No es tu turno.');
+      return;
+    }
+
+    if (gameState.turnState !== 'draw') {
+      socket.emit('error-message', 'Ya robaste carta en este turno.');
+      return;
+    }
+
+    if (gameState.drawPile.length === 0) {
+      gameState.status = 'finished';
+      gameState.turnState = 'confirm-scores';
+      gameState.lastAction = 'El mazo de robo se ha agotado. Fin de la ronda. Esperando confirmación de puntos.';
+      gameState.roundScores = calculateRoundScores(gameState);
+      sendStateToRoom(room);
+      return;
+    }
+
+    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
+      const { turnStartSnapshot, ...snapshotData } = gameState;
+      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
+    }
+
+    const card = gameState.drawPile.pop();
+    gameState.players[pIdx].hand.push(card);
+    gameState.turnState = 'play';
+    
+    if (gameState.isFirstTurn) {
+      gameState.firstDrawnCardId = card.id;
+      gameState.lastAction = `${gameState.players[pIdx].name} robó la primera carta de la partida. Debe decidir si conservarla o descartarla y robar otra.`;
+    } else {
+      gameState.lastAction = `${gameState.players[pIdx].name} robó del mazo.`;
+    }
+    
+    sendStateToRoom(room);
+  });
+
+  // Robar todo el pozo de descarte
+  socket.on('draw-discard', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.turn !== pIdx) {
+      socket.emit('error-message', 'No es tu turno.');
+      return;
+    }
+
+    if (gameState.turnState !== 'draw') {
+      socket.emit('error-message', 'Ya robaste carta en este turno.');
+      return;
+    }
+
+    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
+    
+    if (gameState.is4Player && gameState.mortosTaken[teamIdx] === pIdx) {
+      socket.emit('error-message', 'Como levantaste el Muerto, estás bloqueado de robar del pozo de descartes. Debes robar del mazo.');
+      return;
+    }
+
+    const teamMelds = gameState.players[teamIdx].melds;
+    let totalMeldPoints = 0;
+    teamMelds.forEach(meld => {
+      meld.forEach(c => {
+        totalMeldPoints += CARD_VALUES[c.rank] || 0;
+      });
+    });
+
+    if (totalMeldPoints < 30) {
+      socket.emit('error-message', `No puedes levantar del pozo hasta haber sumado al menos 30 puntos en tus juegos bajados (actualmente tienes ${totalMeldPoints} pts en mesa).`);
+      return;
+    }
+
+    if (gameState.discardPile.length === 0) {
+      socket.emit('error-message', 'El pozo de descarte está vacío.');
+      return;
+    }
+
+    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
+      const { turnStartSnapshot, ...snapshotData } = gameState;
+      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
+    }
+
+    const count = gameState.discardPile.length;
+    gameState.players[pIdx].hand.push(...gameState.discardPile);
+    gameState.discardPile = [];
+    
+    gameState.turnState = 'play';
+    gameState.lastAction = `${gameState.players[pIdx].name} recogió el pozo entero (${count} cartas).`;
+    
+    if (gameState.isFirstTurn) {
+      gameState.isFirstTurn = false;
+      gameState.firstDrawnCardId = null;
+    }
+    
+    sendStateToRoom(room);
+  });
+
+  // Bajar un juego nuevo (secuencia o grupo)
+  socket.on('meld-sequence', ({ cards }) => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.turn !== pIdx) {
+      socket.emit('error-message', 'No es tu turno.');
+      return;
+    }
+
+    if (gameState.turnState !== 'play') {
+      socket.emit('error-message', 'Debes robar una carta antes de bajar juegos.');
+      return;
+    }
+
+    const player = gameState.players[pIdx];
+    const hand = player.hand;
+    const hasAllCards = cards.every(cardToFind => 
+      hand.some(handCard => handCard.id === cardToFind.id)
+    );
+
+    if (!hasAllCards) {
+      socket.emit('error-message', 'No tienes esas cartas en tu mano.');
+      return;
+    }
+
+    const result = validateMeld(cards);
+    if (!result.valid) {
+      socket.emit('error-message', `Juego inválido: ${result.error}`);
+      return;
+    }
+
+    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
+    const teamMelds = gameState.players[teamIdx].melds;
+
+    let totalPointsInMesa = 0;
+    teamMelds.forEach(meld => {
+      meld.forEach(c => {
+        totalPointsInMesa += CARD_VALUES[c.rank] || 0;
+      });
+    });
+
+    const isAlreadyMelded = totalPointsInMesa >= 30;
+
+    let newCardsPoints = 0;
+    cards.forEach(c => {
+      newCardsPoints += CARD_VALUES[c.rank] || 0;
+    });
+
+    if (!isAlreadyMelded && newCardsPoints < 30) {
+      socket.emit('error-message', `Para bajar por primera vez, el juego debe sumar al menos 30 puntos (suma actual: ${newCardsPoints} pts).`);
+      return;
+    }
+
+    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
+    const existingCanastras = teamMelds.filter(m => m.length >= 7).length;
+    const newCanastraCreated = result.cards.length >= 7 ? 1 : 0;
+    const totalCanastrasAfter = existingCanastras + newCanastraCreated;
+    const requiredCanastras = gameState.requiredCanastras || 1;
+    const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
+    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
+
+    if (hand.length - cards.length < minCardsHand) {
+      if (minCardsHand === 2) {
+        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
+      } else {
+        socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
+      }
+      return;
+    }
+
+    cards.forEach(cardToRem => {
+      const idx = hand.findIndex(hc => hc.id === cardToRem.id);
+      if (idx !== -1) hand.splice(idx, 1);
+    });
+
+    gameState.players[teamIdx].melds.push(result.cards);
+    gameState.lastAction = `${player.name} bajó juego: ${result.clean ? 'Limpio' : 'Sucio'} (${cards.length} cartas).`;
+
+    const tookMortoDirect = checkMortoDirectInRoom(room, pIdx);
+    if (!tookMortoDirect) {
+      checkDirectBatidaInRoom(room, pIdx);
+    }
+
+    sendStateToRoom(room);
+  });
+
+  // Acoplar cartas a juego existente
+  socket.on('append-to-meld', ({ meldIndex, cards }) => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.turn !== pIdx) {
+      socket.emit('error-message', 'No es tu turno.');
+      return;
+    }
+
+    if (gameState.turnState !== 'play') {
+      socket.emit('error-message', 'Debes robar una carta antes de bajar juegos.');
+      return;
+    }
+
+    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
+    const player = gameState.players[pIdx];
+    const teamPlayer = gameState.players[teamIdx];
+    
+    if (!teamPlayer.melds[meldIndex]) {
+      socket.emit('error-message', 'Juego seleccionado inválido.');
+      return;
+    }
+
+    const hand = player.hand;
+    const hasAllCards = cards.every(cardToFind => 
+      hand.some(handCard => handCard.id === cardToFind.id)
+    );
+
+    if (!hasAllCards) {
+      socket.emit('error-message', 'No tienes esas cartas en tu mano.');
+      return;
+    }
+
+    const currentMeld = teamPlayer.melds[meldIndex];
+    if (!currentMeld) return;
+    const combined = [...currentMeld, ...cards];
+
+    const result = validateMeld(combined);
+    if (!result.valid) {
+      socket.emit('error-message', `Movimiento inválido: ${result.error}`);
+      return;
+    }
+
+    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
+    const existingCanastras = teamPlayer.melds.filter(m => m.length >= 7).length;
+    const wasCanastra = currentMeld.length >= 7;
+    const willBeCanastra = combined.length >= 7;
+    const netCanastraCreated = (willBeCanastra && !wasCanastra) ? 1 : 0;
+    const totalCanastrasAfter = existingCanastras + netCanastraCreated;
+    const requiredCanastras = gameState.requiredCanastras || 1;
+    const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
+    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
+
+    if (hand.length - cards.length < minCardsHand) {
+      if (minCardsHand === 2) {
+        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
+      } else {
+        socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
+      }
+      return;
+    }
+
+    cards.forEach(cardToRem => {
+      const idx = hand.findIndex(hc => hc.id === cardToRem.id);
+      if (idx !== -1) hand.splice(idx, 1);
+    });
+
+    teamPlayer.melds[meldIndex] = result.cards;
+    gameState.lastAction = `${player.name} acopló cartas a su juego.`;
+
+    const tookMortoDirect = checkMortoDirectInRoom(room, pIdx);
+    if (!tookMortoDirect) {
+      checkDirectBatidaInRoom(room, pIdx);
+    }
+
+    sendStateToRoom(room);
+  });
+
+  // Descartar carta y terminar turno
+  socket.on('discard-card', ({ card }) => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.turn !== pIdx) {
+      socket.emit('error-message', 'No es tu turno.');
+      return;
+    }
+
+    if (gameState.turnState !== 'play') {
+      socket.emit('error-message', 'Debes robar una carta antes de descartar.');
+      return;
+    }
+
+    const player = gameState.players[pIdx];
+    const hand = player.hand;
+    const cardIdx = hand.findIndex(c => c.id === card.id);
+    if (cardIdx === -1) {
+      socket.emit('error-message', 'No tienes esa carta en tu mano.');
+      return;
+    }
+
+    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
+    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
+    const teamMelds = gameState.players[teamIdx].melds;
+    const canastrasCount = teamMelds.filter(m => m.length >= 7).length;
+    const requiredCanastras = gameState.requiredCanastras || 1;
+
+    // Batida final (cierre con descarte)
+    if (hand.length === 1 && hasTakenMorto) {
+      if (canastrasCount < requiredCanastras) {
+        socket.emit('error-message', `No puedes cerrar la partida sin tener al menos ${requiredCanastras} canasta(s) hechas.`);
+        return;
+      }
+      
+      const discarded = hand.splice(cardIdx, 1)[0];
+      gameState.discardPile.push(discarded);
+      gameState.status = 'finished-visual';
+      gameState.winner = pIdx;
+      gameState.turnState = 'match-over-visual';
+      gameState.lastAction = `¡${player.name} ha batido la mano!`;
+      gameState.cutterIndex = pIdx;
+      
+      gameState.roundScores = calculateRoundScores(gameState);
+      sendStateToRoom(room);
+      return;
+    }
+
+    const discarded = hand.splice(cardIdx, 1)[0];
+    gameState.discardPile.push(discarded);
+    gameState.lastAction = `${player.name} descartó ${discarded.rank} de ${discarded.suit}.`;
+
+    if (gameState.isFirstTurn) {
+      gameState.isFirstTurn = false;
+      gameState.firstDrawnCardId = null;
+    }
+
+    checkMortoIndirectInRoom(room, pIdx);
+
+    const maxPlayers = gameState.is4Player ? 4 : 2;
+    const nextTurn = (gameState.turn + 1) % maxPlayers;
+    startPlayerTurnInRoom(room, nextTurn);
+    
+    sendStateToRoom(room);
+  });
+
+  socket.on('show-scores-sheet', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'finished-visual') return;
+    room.gameState.status = 'finished';
+    room.gameState.turnState = 'confirm-scores';
+    sendStateToRoom(room);
+  });
+
+  socket.on('keep-first-card', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || !room.gameState.isFirstTurn) return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1 || room.gameState.turn !== pIdx) return;
+    
+    room.gameState.isFirstTurn = false;
+    room.gameState.firstDrawnCardId = null;
+    room.gameState.lastAction = `${room.gameState.players[pIdx].name} conservó la primera carta del mazo.`;
+    sendStateToRoom(room);
+  });
+
+  socket.on('reject-first-card', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || !room.gameState.isFirstTurn) return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1 || room.gameState.turn !== pIdx) return;
+    const gameState = room.gameState;
+
+    const hand = gameState.players[pIdx].hand;
+    const cardIdx = hand.findIndex(c => c.id === gameState.firstDrawnCardId);
+    if (cardIdx !== -1) {
+      const rejected = hand.splice(cardIdx, 1)[0];
+      gameState.discardPile.push(rejected);
+    }
+    
+    if (gameState.drawPile.length > 0) {
+      const newCard = gameState.drawPile.pop();
+      hand.push(newCard);
+    }
+    
+    gameState.isFirstTurn = false;
+    gameState.firstDrawnCardId = null;
+    gameState.lastAction = `${gameState.players[pIdx].name} descartó la primera carta al pozo y robó otra del mazo.`;
+    sendStateToRoom(room);
+  });
+
+  socket.on('restart-round', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState) return;
+    
+    room.isBotThinking = false;
+    if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+    const currentRequiredCanastras = room.gameState.requiredCanastras || 1;
+    const currentTargetScore = room.gameState.targetScore || 3000;
+    const previousStarter = room.gameState.starterIndex !== undefined ? room.gameState.starterIndex : 0;
+    const maxPlayers = room.is4PlayerSetting ? 4 : 2;
+    const nextStarter = (previousStarter + 1) % maxPlayers;
+
+    const newGame = initGame(room.is4PlayerSetting);
+    newGame.starterIndex = nextStarter;
+    newGame.turn = nextStarter;
+    for (let i = 0; i < maxPlayers; i++) {
+      newGame.players[i].name = room.players[i].name;
+      if (room.players[i] && room.players[i].isBot) {
+        newGame.players[i].isBot = true;
+      }
+    }
+    newGame.requiredCanastras = currentRequiredCanastras;
+    newGame.targetScore = currentTargetScore;
+    newGame.scores = room.globalScores;
+    newGame.roundHistory = room.gameState.roundHistory || [];
+    newGame.lastAction = `Ronda reiniciada. Inicia mano ${newGame.players[nextStarter].name}.`;
+
+    room.gameState = newGame;
+    startPlayerTurnInRoom(room, nextStarter);
+    sendStateToRoom(room);
+  });
+
+  socket.on('reset-game', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room) return;
+    room.globalScores = [0, 0];
+    room.isBotThinking = false;
+    if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+    const currentRequiredCanastras = room.gameState ? room.gameState.requiredCanastras : room.requiredCanastrasSetting;
+    const currentTargetScore = room.gameState ? room.gameState.targetScore : room.targetScoreSetting;
+    const maxPlayers = room.is4PlayerSetting ? 4 : 2;
+    
+    room.gameState = initGame(room.is4PlayerSetting);
+    const sorteoActionText = performSorteoInRoom(room, room.is4PlayerSetting);
+    room.gameState.starterIndex = 0;
+    room.gameState.turn = 0;
+
+    for (let i = 0; i < maxPlayers; i++) {
+      room.gameState.players[i].name = room.players[i].name;
+      if (room.players[i].isBot) {
+        room.gameState.players[i].isBot = true;
+      }
+    }
+    room.gameState.requiredCanastras = currentRequiredCanastras;
+    room.gameState.targetScore = currentTargetScore;
+    room.gameState.scores = room.globalScores;
+    room.gameState.lastAction = `¡Partida reiniciada desde cero! ${sorteoActionText}`;
+    
+    sendStateToRoom(room);
+  });
+
+  socket.on('change-target-score', ({ newTargetScore }) => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState) return;
+    const scoreVal = parseInt(newTargetScore, 10);
+    if ([2000, 3000, 5000].includes(scoreVal)) {
+      room.gameState.targetScore = scoreVal;
+      room.targetScoreSetting = scoreVal;
+      room.gameState.lastAction = `Puntos para ganar ajustados a ${scoreVal} pts.`;
+      sendStateToRoom(room);
+    }
+  });
+
+  socket.on('request-undo', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.turn !== pIdx) {
+      socket.emit('error-message', 'Solo puedes deshacer jugadas en tu propio turno.');
+      return;
+    }
+
+    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
+    const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
+    const maxUndos = gameState.is4Player ? 3 : 2;
+
+    if (gameState.teamUndoCounts[teamIdx] >= maxUndos) {
+      socket.emit('error-message', `Tu equipo ya ha utilizado el máximo de ${maxUndos} deshechos permitidos en esta partida.`);
+      return;
+    }
+
+    if (!gameState.turnStartSnapshot) {
+      socket.emit('error-message', 'No hay jugadas pendientes de confirmación en este turno para deshacer.');
+      return;
+    }
+
+    gameState.undoRequestedBy = pIdx;
+    
+    const opponentIndices = gameState.is4Player ? [opponentTeamIdx, opponentTeamIdx + 2] : [opponentTeamIdx];
+    const opponentHumans = opponentIndices.map(idx => room.players[idx]).filter(p => p && !p.isBot && p.socketId);
+    
+    if (opponentHumans.length === 0) {
+      applyUndoInRoom(room, pIdx, teamIdx);
+      return;
+    }
+
+    opponentHumans.forEach(opp => {
+      io.to(opp.socketId).emit('undo-requested', {
+        requesterName: room.players[pIdx].name,
+        requesterIdx: pIdx
+      });
+    });
+
+    socket.emit('undo-waiting', { message: 'Esperando aprobación del rival para deshacer tu jugada...' });
+  });
+
+  socket.on('respond-undo', ({ accept }) => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1) return;
+    const gameState = room.gameState;
+
+    if (gameState.undoRequestedBy === null) return;
+
+    const requesterIdx = gameState.undoRequestedBy;
+    const requesterPlayer = room.players[requesterIdx];
+    const responderPlayer = room.players[pIdx];
+    const teamIdx = getTeamOwnerIndex(requesterIdx, gameState.is4Player);
+
+    if (accept) {
+      applyUndoInRoom(room, requesterIdx, teamIdx);
+    } else {
+      gameState.undoRequestedBy = null;
+      gameState.lastAction = `${responderPlayer.name} rechazó la solicitud de deshacer de ${requesterPlayer.name}.`;
+      if (requesterPlayer && requesterPlayer.socketId) {
+        io.to(requesterPlayer.socketId).emit('error-message', `${responderPlayer.name} no aceptó deshacer tu jugada.`);
+      }
+      sendStateToRoom(room);
+    }
+  });
+
+  socket.on('debug-simulate-batida', (payload) => {
+    const pass = typeof payload === 'string' ? payload : payload?.pass;
+    if (pass !== 'lom@lind@') {
+      socket.emit('error-message', 'Acceso denegado: se requiere clave de desarrollador.');
+      return;
+    }
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const gameState = room.gameState;
+
+    const cutter = gameState.turn;
+    const teamIdx = getTeamOwnerIndex(cutter, gameState.is4Player);
+    
+    if (gameState.is4Player) {
+      gameState.mortosTaken[teamIdx] = cutter;
+    } else {
+      gameState.mortosTaken[cutter] = true;
+    }
+
+    gameState.status = 'finished-visual';
+    gameState.winner = cutter;
+    gameState.cutterIndex = cutter;
+    gameState.turnState = 'match-over-visual';
+    gameState.lastAction = `⚡ Simulación de Desarrollador: ¡${gameState.players[cutter].name} bate la ronda!`;
+    gameState.roundScores = calculateRoundScores(gameState);
+    
+    sendStateToRoom(room);
+  });
+
+  socket.on('leave-game', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room) return;
+    const pIndex = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIndex !== -1) {
+      const leavingPlayerName = room.players[pIndex].name;
+      console.log(`Jugador abandonó sala ${room.id}: ${leavingPlayerName}`);
+      room.players = [];
+      room.gameState = null;
+      room.globalScores = [0, 0];
+      room.isBotThinking = false;
+      if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+      io.to(room.id).emit('game-aborted', `${leavingPlayerName} ha abandonado la partida. Se canceló la mesa.`);
+      socket.leave(room.id);
+    }
+  });
+
+  socket.on('disconnect', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room) return;
+    const index = room.players.findIndex(p => p.socketId === socket.id);
+    if (index !== -1) {
+      console.log(`Jugador desconectado de sala ${room.id}: ${room.players[index].name}`);
+      room.players[index].socketId = null;
+    }
+
+    const activeHumans = room.players.filter(p => p.socketId && !p.socketId.startsWith('bot-socket') && !p.isBot);
+    if (activeHumans.length === 0) {
+      console.log(`Sala ${room.id} vacía de humanos. Programando limpieza diferida en 20 segundos.`);
+      if (room.cleanupTimeout) clearTimeout(room.cleanupTimeout);
+      room.cleanupTimeout = setTimeout(() => {
+        const stillNoHumans = room.players.filter(p => p.socketId && !p.socketId.startsWith('bot-socket') && !p.isBot).length === 0;
+        if (stillNoHumans) {
+          console.log(`Limpiando sala ${room.id} por inactividad prolongada.`);
+          if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+          rooms.delete(room.id);
+        }
+        room.cleanupTimeout = null;
+      }, 20000);
+    }
+  });
+
+  socket.on('confirm-round-scores', ({ roundBreakdown }) => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'finished') return;
+    const gameState = room.gameState;
+
+    const roundPointsTeam0 = roundBreakdown.team0.totalRound;
+    const roundPointsTeam1 = roundBreakdown.team1.totalRound;
+
+    room.globalScores[0] += roundPointsTeam0;
+    room.globalScores[1] += roundPointsTeam1;
+
+    const currentHistory = gameState.roundHistory || [];
+    currentHistory.push({
+      roundNumber: currentHistory.length + 1,
+      breakdown: roundBreakdown,
+      accumulatedScores: [...room.globalScores]
+    });
+
+    const isMatchOver = room.globalScores[0] >= gameState.targetScore || room.globalScores[1] >= gameState.targetScore;
+    if (isMatchOver) {
+      gameState.status = 'match-over';
+      gameState.turnState = 'match-over';
+      gameState.scores = [...room.globalScores];
+      gameState.roundHistory = currentHistory;
+      sendStateToRoom(room);
+      return;
+    }
+
+    const currentRequiredCanastras = gameState.requiredCanastras;
+    const previousStarter = gameState.starterIndex !== undefined ? gameState.starterIndex : 0;
+    const maxPlayers = room.is4PlayerSetting ? 4 : 2;
+    const nextStarter = (previousStarter + 1) % maxPlayers;
+
+    const newGame = initGame(room.is4PlayerSetting);
+    newGame.starterIndex = nextStarter;
+    newGame.turn = nextStarter;
+    for (let i = 0; i < maxPlayers; i++) {
+      newGame.players[i].name = room.players[i].name;
+      if (room.players[i] && room.players[i].isBot) {
+        newGame.players[i].isBot = true;
+      }
+    }
+    newGame.requiredCanastras = currentRequiredCanastras;
+    newGame.roundHistory = currentHistory;
+    newGame.scores = [...room.globalScores];
+    newGame.lastAction = `Comienza nueva ronda. Sale de mano ${newGame.players[nextStarter].name}.`;
+
+    room.gameState = newGame;
+    room.isBotThinking = false;
+    if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+    startPlayerTurnInRoom(room, nextStarter);
+    sendStateToRoom(room);
+  });
+});
 
 // HELPER: Rastrear cartas visibles e invisibles en la partida
 function getCardTracker(state, botIdx) {
@@ -1310,26 +1319,25 @@ function getProbabilityOfCard(suit, rank, tracker) {
   return remaining / tracker.totalInvisible;
 }
 
-// LÓGICA DE CONTROL DEL BOT DE IA
-let isBotThinking = false;
 
-function checkAndTriggerBotTurn() {
-  if (!gameState || gameState.status !== 'playing' || isBotThinking) return;
 
-  const botIdx = gameState.turn;
-  const activePlayer = players[botIdx];
-
-  if (activePlayer && activePlayer.isBot) {
-    isBotThinking = true;
-    setTimeout(() => {
-      runBotTurn(botIdx);
-    }, 1500); // Demora simulando pensar
+function runBotTurnInRoom(room, botIdx) {
+  if (!room || !room.gameState || room.gameState.status !== 'playing') {
+    if (room) room.isBotThinking = false;
+    return;
   }
-}
 
+  const gameState = room.gameState;
+  const players = room.players;
+  let isBotThinking = false; // local shadow
+  const sendStateToAll = () => sendStateToRoom(room);
+  const startPlayerTurn = (nextTurn) => startPlayerTurnInRoom(room, nextTurn);
+  const checkMortoDirect = (bIdx) => checkMortoDirectInRoom(room, bIdx);
+  const checkMortoIndirect = (bIdx) => checkMortoIndirectInRoom(room, bIdx);
+  const checkDirectBatida = (bIdx) => checkDirectBatidaInRoom(room, bIdx);
+  const performOneBotMeldAction = (bIdx) => performOneBotMeldActionInRoom(room, bIdx);
+  const runBotDiscardPhase = (bIdx) => runBotDiscardPhaseInRoom(room, bIdx);
 
-
-function runBotTurn(botIdx) {
   if (!gameState || gameState.status !== 'playing') {
     isBotThinking = false;
     return;
@@ -1531,6 +1539,7 @@ function runBotTurn(botIdx) {
 
     executeBotMeldStep();
   }, 1500);
+
 }
 
 // HELPER: Comprueba si un comodín (2 o Joker) puede formar un juego nuevo (trío o escalera) con cartas de la mano
@@ -1766,8 +1775,15 @@ function simulateBotMelding(hand, existingMelds) {
   return { cardsPlayed, points };
 }
 
-// REALIZA EXACTAMENTE UNA ACCIÓN DE ACOPLE O BAJAR UN JUEGO NUEVO
-function performOneBotMeldAction(botIdx) {
+
+
+function performOneBotMeldActionInRoom(room, botIdx) {
+  const gameState = room.gameState;
+  const players = room.players;
+  const checkMortoDirect = (bIdx) => checkMortoDirectInRoom(room, bIdx);
+  const checkDirectBatida = (bIdx) => checkDirectBatidaInRoom(room, bIdx);
+  const tryMeldBotRun = (cToMeld, bIdx, hMelded) => tryMeldBotRunInRoom(room, cToMeld, bIdx, hMelded);
+
   let botPlayer = gameState.players[botIdx];
   let botHand = botPlayer.hand;
   const teamIdx = getTeamOwnerIndex(botIdx, gameState.is4Player);
@@ -2008,10 +2024,21 @@ function performOneBotMeldAction(botIdx) {
   }
 
   return false;
+
 }
 
-// FASE DE DESCARTE DE LA IA
-function runBotDiscardPhase(botIdx) {
+function runBotDiscardPhaseInRoom(room, botIdx) {
+  if (!room || !room.gameState || room.gameState.status !== 'playing') {
+    if (room) room.isBotThinking = false;
+    return;
+  }
+  const gameState = room.gameState;
+  const players = room.players;
+  let isBotThinking = false; // local shadow
+  const sendStateToAll = () => sendStateToRoom(room);
+  const startPlayerTurn = (nextTurn) => startPlayerTurnInRoom(room, nextTurn);
+  const checkMortoIndirect = (bIdx) => checkMortoIndirectInRoom(room, bIdx);
+
   if (!gameState || gameState.status !== 'playing') {
     isBotThinking = false;
     return;
@@ -2255,6 +2282,7 @@ function runBotDiscardPhase(botIdx) {
   startPlayerTurn(nextTurn);
 
   sendStateToAll();
+
 }
 
 // HELPER: Conexiones de cartas en la mano para la IA (escaleras y triadas)
@@ -2318,7 +2346,14 @@ function evaluatePilePotential(pile, hand, tracker) {
   };
 }
 
-function tryMeldBotRun(cardsToMeld, botIdx, hasMelded) {
+
+
+function tryMeldBotRunInRoom(room, cardsToMeld, botIdx, hasMelded) {
+  const gameState = room.gameState;
+  const players = room.players;
+  const checkMortoDirect = (bIdx) => checkMortoDirectInRoom(room, bIdx);
+  const checkDirectBatida = (bIdx) => checkDirectBatidaInRoom(room, bIdx);
+
   const botPlayer = gameState.players[botIdx];
   const botHand = botPlayer.hand;
   const teamIdx = getTeamOwnerIndex(botIdx, gameState.is4Player);
@@ -2356,12 +2391,13 @@ function tryMeldBotRun(cardsToMeld, botIdx, hasMelded) {
     return true;
   }
   return false;
+
 }
 
 server.listen(PORT, () => {
-  console.log(`-----------------------------------------------------`);
-  console.log(`Servidor de Buraco ejecutándose en:`);
+  console.log('-----------------------------------------------------');
+  console.log('Servidor de Buraco Multi-Sala ejecutándose en:');
   console.log(`- Local: http://localhost:${PORT}`);
   console.log(`- Red Local: http://${LOCAL_IP}:${PORT}`);
-  console.log(`-----------------------------------------------------`);
+  console.log('-----------------------------------------------------');
 });

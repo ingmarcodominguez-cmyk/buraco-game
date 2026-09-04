@@ -21,10 +21,18 @@ export default function App() {
   const [isAgainstBotSetting, setIsAgainstBotSetting] = useState(false);
   const [selectedTargetScore, setSelectedTargetScore] = useState(3000);
   const [is4PlayerSetting, setIs4PlayerSetting] = useState(false);
+  const [currentRoomId, setCurrentRoomId] = useState('mesa-1');
   const [joined, setJoined] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDevAuthorized, setIsDevAuthorized] = useState(() => sessionStorage.getItem('buraco_dev_auth') === 'true');
+
+  const handleRoomChange = (newRoomId) => {
+    setCurrentRoomId(newRoomId);
+    if (socket && socket.connected) {
+      socket.emit('get-lobby-info', { roomId: newRoomId });
+    }
+  };
 
   const handleToggleDevAuth = () => {
     if (isDevAuthorized) {
@@ -92,21 +100,33 @@ export default function App() {
     });
 
     // Información inicial del lobby
-    socket.on('lobby-info', ({ localIp, players }) => {
+    socket.on('lobby-info', ({ localIp, players, roomId }) => {
       setLocalIp(localIp);
-      setLobbyPlayers(players);
+      setLobbyPlayers(players || []);
+      if (roomId && !joined) {
+        setCurrentRoomId(roomId);
+      }
     });
 
     // Actualizaciones de jugadores conectados en la sala de espera
-    socket.on('lobby-update', (players) => {
-      setLobbyPlayers(players);
+    socket.on('lobby-update', (data) => {
+      if (data && data.roomId) {
+        if (data.roomId === currentRoomId) {
+          setLobbyPlayers(data.players || []);
+        }
+      } else if (Array.isArray(data)) {
+        setLobbyPlayers(data);
+      }
     });
 
     // Recibir actualizaciones del estado del juego en tiempo real
-    socket.on('game-state', ({ gameState, playerIndex, lobbyPlayers }) => {
+    socket.on('game-state', ({ gameState, playerIndex, lobbyPlayers, roomId }) => {
       setGameState(gameState);
       setPlayerIndex(playerIndex);
-      setLobbyPlayers(lobbyPlayers);
+      setLobbyPlayers(lobbyPlayers || []);
+      if (roomId) {
+        setCurrentRoomId(roomId);
+      }
       setJoined(true);
     });
 
@@ -124,7 +144,14 @@ export default function App() {
     // Manejar re-conexión automática si ya teníamos un nombre ingresado
     socket.on('reconnect', () => {
       if (playerName) {
-        socket.emit('join-lobby', { name: playerName, requiredCanastras: selectedCanastras, isAgainstBot: isAgainstBotSetting, targetScore: selectedTargetScore, is4Player: is4PlayerSetting });
+        socket.emit('join-lobby', { 
+          name: playerName, 
+          requiredCanastras: selectedCanastras, 
+          isAgainstBot: isAgainstBotSetting, 
+          targetScore: selectedTargetScore, 
+          is4Player: is4PlayerSetting,
+          roomId: currentRoomId
+        });
       }
     });
 
@@ -137,7 +164,7 @@ export default function App() {
       socket.off('error-message');
       socket.off('game-aborted');
     };
-  }, [playerName]);
+  }, [playerName, currentRoomId, selectedCanastras, isAgainstBotSetting, selectedTargetScore, is4PlayerSetting, joined]);
 
   // Temporizador para desvanecer el mensaje de error/alerta
   useEffect(() => {
@@ -149,14 +176,15 @@ export default function App() {
     }
   }, [errorMessage]);
 
-  const handleJoinLobby = (name, requiredCanastras, playAgainstBot, targetScore, is4Player) => {
+  const handleJoinLobby = (name, requiredCanastras, playAgainstBot, targetScore, is4Player, roomId = 'mesa-1') => {
     setPlayerName(name);
     setSelectedCanastras(requiredCanastras);
     setIsAgainstBotSetting(playAgainstBot);
     setSelectedTargetScore(targetScore);
     setIs4PlayerSetting(is4Player);
+    setCurrentRoomId(roomId);
     setJoined(true);
-    socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player });
+    socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player, roomId });
   };
 
   const handleGameAction = (actionName, data = {}) => {
@@ -243,6 +271,18 @@ export default function App() {
 
             {joined && (
               <>
+                <span style={{ 
+                  fontSize: '0.8rem', 
+                  padding: '3px 8px', 
+                  borderRadius: '6px', 
+                  background: 'rgba(56, 189, 248, 0.15)', 
+                  border: '1px solid rgba(56, 189, 248, 0.4)', 
+                  color: '#38bdf8', 
+                  fontWeight: 600,
+                  marginRight: '6px'
+                }}>
+                  🪑 {currentRoomId.toUpperCase()}
+                </span>
                 <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
                   Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
                 </span>
@@ -260,8 +300,8 @@ export default function App() {
                       alignItems: 'center', 
                       gap: '6px', 
                       background: 'rgba(245, 158, 11, 0.2)', 
-                      border: '1px solid rgba(245, 158, 11, 0.5)',
-                      color: '#fbbf24'
+                      border: '1px solid rgba(245, 158, 11, 0.5)', 
+                      color: '#fbbf24' 
                     }}
                     title="Simular corte instantáneo para verificar el diseño visual de la mesa"
                   >
@@ -295,6 +335,8 @@ export default function App() {
           localIp={localIp}
           players={lobbyPlayers}
           connected={connected}
+          currentRoomId={currentRoomId}
+          onRoomChange={handleRoomChange}
         />
       ) : (
         <Board 
