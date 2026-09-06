@@ -1692,6 +1692,123 @@ function runBotTurnInRoom(room, botIdx) {
 
 }
 
+// HELPER: Rango de cartas para la IA
+const BOT_RANK_ORDER = { 'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+
+// HELPER: Mapea las cartas de un palo en la mano a sus slots posibles (1..14)
+function getSuitCardSlots(hand, suit) {
+  const slots = [];
+  hand.forEach(c => {
+    if (!c) return;
+    if (c.rank === 'Joker') return;
+    if (c.rank === '2' && c.suit !== suit) return;
+    if (c.suit !== suit) return;
+    if (c.rank === 'A') {
+      slots.push({ card: c, slot: 1 });
+      slots.push({ card: c, slot: 14 });
+    } else if (c.rank === '2' && c.suit === suit) {
+      slots.push({ card: c, slot: 2 });
+    } else {
+      const v = BOT_RANK_ORDER[c.rank];
+      if (v) slots.push({ card: c, slot: v });
+    }
+  });
+  return slots;
+}
+
+// HELPER: Extrae secuencias limpias (3+ cartas consecutivas) de un palo
+function extractCleanRunsForSuit(hand, suit) {
+  const foundRuns = [];
+  let currentHand = [...hand];
+
+  while (true) {
+    const slots = getSuitCardSlots(currentHand, suit);
+    if (slots.length < 3) break;
+
+    const slotCardMap = {};
+    for (let s = 1; s <= 14; s++) slotCardMap[s] = [];
+    slots.forEach(item => {
+      slotCardMap[item.slot].push(item.card);
+    });
+
+    let bestRun = null;
+    let curRun = [];
+    let curStart = -1;
+    let usedCardIds = new Set();
+
+    for (let s = 1; s <= 14; s++) {
+      const availableCards = slotCardMap[s].filter(c => !usedCardIds.has(c.id));
+      if (availableCards.length > 0) {
+        if (curRun.length === 0) curStart = s;
+        const chosenCard = availableCards[0];
+        curRun.push(chosenCard);
+        usedCardIds.add(chosenCard.id);
+      } else {
+        if (curRun.length >= 3) {
+          if (!bestRun || curRun.length > bestRun.length) {
+            bestRun = [...curRun];
+          }
+        }
+        curRun = [];
+        curStart = -1;
+        usedCardIds.clear();
+      }
+    }
+    if (curRun.length >= 3) {
+      if (!bestRun || curRun.length > bestRun.length) {
+        bestRun = [...curRun];
+      }
+    }
+
+    if (!bestRun || bestRun.length < 3) break;
+
+    const v = validateMeld(bestRun);
+    if (!v.valid) break;
+
+    foundRuns.push(bestRun);
+    bestRun.forEach(rc => {
+      const idx = currentHand.findIndex(c => c.id === rc.id);
+      if (idx !== -1) currentHand.splice(idx, 1);
+    });
+  }
+
+  return { foundRuns, remainingHand: currentHand };
+}
+
+// HELPER: Encuentra combinaciones de 3 cartas (2 cartas del mismo palo + 1 comodín)
+function findDirtyRunsCandidates(hand) {
+  const candidates = [];
+  const wildcards = hand.filter(c => c.rank === '2' || c.rank === 'Joker');
+  if (wildcards.length === 0) return candidates;
+
+  const suits = ['H', 'D', 'C', 'S'];
+  for (let s of suits) {
+    const slots = getSuitCardSlots(hand, s);
+    for (let i = 0; i < slots.length; i++) {
+      for (let j = i + 1; j < slots.length; j++) {
+        const s1 = slots[i];
+        const s2 = slots[j];
+        if (s1.card.id === s2.card.id) continue;
+        const diff = Math.abs(s1.slot - s2.slot);
+        if (diff === 1 || diff === 2) {
+          for (const wc of wildcards) {
+            if (wc.id === s1.card.id || wc.id === s2.card.id) continue;
+            const cand = [s1.card, s2.card, wc];
+            const v = validateMeld(cand);
+            if (v.valid) {
+              const points = cand.reduce((sum, c) => sum + (CARD_VALUES[c.rank] || 0), 0);
+              candidates.push({ cards: cand, points, validated: v.cards });
+            }
+          }
+        }
+      }
+    }
+  }
+
+  candidates.sort((a, b) => b.points - a.points);
+  return candidates;
+}
+
 // HELPER: Comprueba si un comodín (2 o Joker) puede formar un juego nuevo (trío o escalera) con cartas de la mano
 function canWildcardFormNewMeldInHand(wildcard, hand) {
   if (!wildcard || (wildcard.rank !== '2' && wildcard.rank !== 'Joker')) return false;
@@ -1715,20 +1832,20 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
   }
 
   // 2. ¿Puede formar una nueva escalera (secuencia del mismo palo)?
-  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
   const suits = ['H', 'D', 'C', 'S'];
   for (let s of suits) {
-    let suitCards = hand.filter(c => c.id !== wildcard.id && c.suit === s && c.rank !== '2' && c.rank !== 'Joker');
-    suitCards.sort((a, b) => (rankOrderVals[a.rank] || 0) - (rankOrderVals[b.rank] || 0));
-    for (let i = 0; i < suitCards.length - 1; i++) {
-      const c1 = suitCards[i];
-      const c2 = suitCards[i+1];
-      const v1 = rankOrderVals[c1.rank];
-      const v2 = rankOrderVals[c2.rank];
-      if (v2 === v1 + 1 || v2 === v1 + 2) {
-        const candidate = [c1, c2, wildcard];
-        if (validateMeld(candidate).valid) {
-          return true;
+    const slots = getSuitCardSlots(hand.filter(c => c.id !== wildcard.id), s);
+    for (let i = 0; i < slots.length; i++) {
+      for (let j = i + 1; j < slots.length; j++) {
+        const s1 = slots[i];
+        const s2 = slots[j];
+        if (s1.card.id === s2.card.id) continue;
+        const diff = Math.abs(s1.slot - s2.slot);
+        if (diff === 1 || diff === 2) {
+          const candidate = [s1.card, s2.card, wildcard];
+          if (validateMeld(candidate).valid) {
+            return true;
+          }
         }
       }
     }
@@ -1741,41 +1858,45 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
 function canNaturalCardFormIndependentMeldInHand(card, hand) {
   if (!card || card.rank === '2' || card.rank === 'Joker') return false;
 
-  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-  const cardVal = rankOrderVals[card.rank];
-  if (!cardVal) return false;
-
   // 1. ¿Puede formar una secuencia limpia de 3+ cartas de su mismo palo en mano?
-  const sameSuitCards = hand.filter(c => c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker');
-  const distinctVals = Array.from(new Set(sameSuitCards.map(c => rankOrderVals[c.rank]))).sort((a, b) => a - b);
-  
-  for (let i = 0; i < distinctVals.length; i++) {
-    let runLength = 1;
-    let containsCard = (distinctVals[i] === cardVal);
-    for (let j = i + 1; j < distinctVals.length; j++) {
-      if (distinctVals[j] === distinctVals[j - 1] + 1) {
-        runLength++;
-        if (distinctVals[j] === cardVal) containsCard = true;
-      } else {
-        break;
+  const slots = getSuitCardSlots(hand, card.suit);
+  const cardSlots = slots.filter(s => s.card.id === card.id).map(s => s.slot);
+  for (const cSlot of cardSlots) {
+    for (let len = 3; len <= 14; len++) {
+      for (let start = Math.max(1, cSlot - len + 1); start <= Math.min(15 - len, cSlot); start++) {
+        let allPresent = true;
+        for (let step = 0; step < len; step++) {
+          const requiredSlot = start + step;
+          if (!slots.some(s => s.slot === requiredSlot)) {
+            allPresent = false;
+            break;
+          }
+        }
+        if (allPresent) {
+          const runCards = [];
+          for (let step = 0; step < len; step++) {
+            const requiredSlot = start + step;
+            const match = slots.find(s => s.slot === requiredSlot && !runCards.some(rc => rc.id === s.card.id));
+            if (match) runCards.push(match.card);
+          }
+          if (runCards.length >= 3 && runCards.some(rc => rc.id === card.id)) {
+            if (validateMeld(runCards).valid) return true;
+          }
+        }
       }
-    }
-    if (runLength >= 3 && containsCard) {
-      return true;
     }
   }
 
   // 2. ¿Puede formar una secuencia sucia de 3 cartas usando un comodín de la mano?
   const wildcards = hand.filter(c => c.rank === '2' || c.rank === 'Joker');
   if (wildcards.length > 0) {
-    for (let other of sameSuitCards) {
-      if (other.id === card.id) continue;
-      const otherVal = rankOrderVals[other.rank];
-      const diff = Math.abs(otherVal - cardVal);
-      if (diff === 1 || diff === 2) {
-        const candidate = [card, other, wildcards[0]];
-        if (validateMeld(candidate).valid) {
-          return true;
+    for (const cSlot of cardSlots) {
+      for (const otherSlot of slots) {
+        if (otherSlot.card.id === card.id) continue;
+        const diff = Math.abs(cSlot - otherSlot.slot);
+        if (diff === 1 || diff === 2) {
+          const candidate = [card, otherSlot.card, wildcards[0]];
+          if (validateMeld(candidate).valid) return true;
         }
       }
     }
@@ -1841,109 +1962,43 @@ function simulateBotMelding(hand, existingMelds) {
     }
   } while (tempAppended);
 
-  // 2. Simular nuevas secuencias limpias
+  // 2. Simular nuevas secuencias limpias (reconociendo As alto y 2 natural)
   const suits = ['H', 'D', 'C', 'S'];
-  const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-  
   for (let suit of suits) {
-    let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-    suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-    let run = [];
-    for (let i = 0; i < suitCards.length; i++) {
-      const card = suitCards[i];
-      if (run.length === 0) run.push(card);
-      else {
-        const lastVal = rankOrder[run[run.length - 1].rank];
-        const curVal = rankOrder[card.rank];
-        if (curVal === lastVal + 1) run.push(card);
-        else if (curVal > lastVal + 1) {
-          if (run.length >= 10) {
-            const canastaPart = run.slice(run.length - 7);
-            const remainderPart = run.slice(0, run.length - 7);
-            const resC = validateMeld(canastaPart);
-            const resR = validateMeld(remainderPart);
-            if (resC.valid && resR.valid) {
-              tempMelds.push(resC.cards);
-              tempMelds.push(resR.cards);
-              cardsPlayed += run.length;
-              run.forEach(rc => {
-                const idx = tempHand.findIndex(c => c.id === rc.id);
-                if (idx !== -1) tempHand.splice(idx, 1);
-              });
-            }
-          } else if (run.length >= 3) {
-            const result = validateMeld(run);
-            if (result.valid) {
-              tempMelds.push(result.cards);
-              cardsPlayed += run.length;
-              run.forEach(rc => {
-                const idx = tempHand.findIndex(c => c.id === rc.id);
-                if (idx !== -1) tempHand.splice(idx, 1);
-              });
-            }
-          }
-          run = [card];
+    const { foundRuns, remainingHand } = extractCleanRunsForSuit(tempHand, suit);
+    foundRuns.forEach(run => {
+      if (run.length >= 10) {
+        const canastaPart = run.slice(run.length - 7);
+        const remainderPart = run.slice(0, run.length - 7);
+        const resC = validateMeld(canastaPart);
+        const resR = validateMeld(remainderPart);
+        if (resC.valid && resR.valid) {
+          tempMelds.push(resC.cards);
+          tempMelds.push(resR.cards);
+          cardsPlayed += run.length;
+        }
+      } else if (run.length >= 3) {
+        const result = validateMeld(run);
+        if (result.valid) {
+          tempMelds.push(result.cards);
+          cardsPlayed += run.length;
         }
       }
-    }
-    if (run.length >= 10) {
-      const canastaPart = run.slice(run.length - 7);
-      const remainderPart = run.slice(0, run.length - 7);
-      const resC = validateMeld(canastaPart);
-      const resR = validateMeld(remainderPart);
-      if (resC.valid && resR.valid) {
-        tempMelds.push(resC.cards);
-        tempMelds.push(resR.cards);
-        cardsPlayed += run.length;
-        run.forEach(rc => {
-          const idx = tempHand.findIndex(c => c.id === rc.id);
-          if (idx !== -1) tempHand.splice(idx, 1);
-        });
-      }
-    } else if (run.length >= 3) {
-      const result = validateMeld(run);
-      if (result.valid) {
-        tempMelds.push(result.cards);
-        cardsPlayed += run.length;
-        run.forEach(rc => {
-          const idx = tempHand.findIndex(c => c.id === rc.id);
-          if (idx !== -1) tempHand.splice(idx, 1);
-        });
-      }
-    }
+    });
+    tempHand = remainingHand;
   }
 
-  // 3. Simular nuevas secuencias sucias usando comodines
-  let wildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
-  if (wildcards.length > 0) {
-    for (let suit of suits) {
-      let suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2');
-      suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-      for (let i = 0; i < suitCards.length - 1; i++) {
-        if (wildcards.length === 0) break;
-        const c1 = suitCards[i];
-        const c2 = suitCards[i+1];
-        const v1 = rankOrder[c1.rank];
-        const v2 = rankOrder[c2.rank];
-        if (v2 === v1 + 1 || v2 === v1 + 2) {
-          const wc = wildcards[0];
-          const candidate = [c1, c2, wc];
-          const result = validateMeld(candidate);
-          if (result.valid) {
-            tempMelds.push(result.cards);
-            wildcards.shift();
-            cardsPlayed += 3;
-            [c1, c2, wc].forEach(rc => {
-              const idx = tempHand.findIndex(c => c.id === rc.id);
-              if (idx !== -1) tempHand.splice(idx, 1);
-            });
-            suitCards = tempHand.filter(c => c.suit === suit && c.rank !== '2');
-            suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-            i = -1;
-          }
-        }
-      }
-    }
+  // 3. Simular nuevas secuencias sucias usando comodines (priorizadas por puntos)
+  while (true) {
+    const dirtyCands = findDirtyRunsCandidates(tempHand);
+    if (dirtyCands.length === 0) break;
+    const best = dirtyCands[0];
+    tempMelds.push(best.validated);
+    cardsPlayed += 3;
+    best.cards.forEach(rc => {
+      const idx = tempHand.findIndex(c => c.id === rc.id);
+      if (idx !== -1) tempHand.splice(idx, 1);
+    });
   }
 
   // 4. Simular nuevos grupos limpios
@@ -1970,7 +2025,7 @@ function simulateBotMelding(hand, existingMelds) {
   }
 
   // 5. Simular nuevos grupos sucios usando comodines
-  wildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
+  let wildcards = tempHand.filter(c => c.rank === '2' || c.rank === 'Joker');
   if (wildcards.length > 0) {
     const remainingGroups = {};
     tempHand.forEach(card => {
@@ -2049,8 +2104,8 @@ function performOneBotMeldActionInRoom(room, botIdx) {
 
   // Comprobar apertura inicial de 30 puntos si no está bajado
   if (!isAlreadyMelded) {
-    const openingSim = simulateBotMelding(botHand, []);
-    if (openingSim.points < 30) {
+    const openingSim = simulateBotMelding(botHand, botMelds);
+    if (botMeldPoints + openingSim.points < 30) {
       return false; // No podemos bajar nada aún porque no sumamos 30
     }
   }
@@ -2155,59 +2210,26 @@ function performOneBotMeldActionInRoom(room, botIdx) {
 
   // 2. Intentar bajar exactamente un juego nuevo
   const suits = ['H', 'D', 'C', 'S'];
-  const rankOrder = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
 
-  // Bajar secuencias limpias de 3 o más
+  // Bajar secuencias limpias de 3 o más (incluyendo As alto y 2 natural)
   for (let suit of suits) {
-    let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-    suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-    let run = [];
-    for (let i = 0; i < suitCards.length; i++) {
-      const card = suitCards[i];
-      if (run.length === 0) run.push(card);
-      else {
-        const lastVal = rankOrder[run[run.length - 1].rank];
-        const curVal = rankOrder[card.rank];
-        if (curVal === lastVal + 1) run.push(card);
-        else if (curVal > lastVal + 1) {
-          if (run.length >= 10) {
-            // Prioridad táctica: Si tiene 10 o más cartas continuas, bajar primero una canasta limpia de 7 cartas
-            // y dejar el resto (3+ cartas) en mano para bajarlas en la siguiente acción como juego separado.
-            const canastaCards = run.slice(run.length - 7);
-            if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
-          } else if (run.length >= 3) {
-            if (tryMeldBotRun(run, botIdx, true)) return true;
-          }
-          run = [card];
-        }
+    const { foundRuns } = extractCleanRunsForSuit(botHand, suit);
+    for (const run of foundRuns) {
+      if (run.length >= 10) {
+        // Prioridad táctica: Si tiene 10 o más cartas continuas, bajar primero una canasta limpia de 7 cartas
+        // y dejar el resto (3+ cartas) en mano para bajarlas en la siguiente acción como juego separado.
+        const canastaCards = run.slice(run.length - 7);
+        if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
+      } else if (run.length >= 3) {
+        if (tryMeldBotRun(run, botIdx, true)) return true;
       }
-    }
-    if (run.length >= 10) {
-      const canastaCards = run.slice(run.length - 7);
-      if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
-    } else if (run.length >= 3) {
-      if (tryMeldBotRun(run, botIdx, true)) return true;
     }
   }
 
-  // Secuencia usando comodín
-  const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
-  if (freshWildcards.length > 0) {
-    for (let suit of suits) {
-      let suitCards = botHand.filter(c => c.suit === suit && c.rank !== '2' && c.rank !== 'Joker');
-      suitCards.sort((a, b) => (rankOrder[a.rank] || 0) - (rankOrder[b.rank] || 0));
-      for (let i = 0; i < suitCards.length - 1; i++) {
-        const c1 = suitCards[i];
-        const c2 = suitCards[i+1];
-        const v1 = rankOrder[c1.rank];
-        const v2 = rankOrder[c2.rank];
-        if (v2 === v1 + 1 || v2 === v1 + 2) {
-          const wc = freshWildcards[0];
-          const candidate = [c1, c2, wc];
-          if (tryMeldBotRun(candidate, botIdx, true)) return true;
-        }
-      }
-    }
+  // Secuencias usando comodín (ordenadas por puntaje descendente)
+  const dirtyCandidates = findDirtyRunsCandidates(botHand);
+  for (const candidate of dirtyCandidates) {
+    if (tryMeldBotRun(candidate.cards, botIdx, true)) return true;
   }
 
   // Grupos
@@ -2218,6 +2240,7 @@ function performOneBotMeldActionInRoom(room, botIdx) {
       rankGroups[card.rank].push(card);
     }
   });
+  const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
   for (const rank of Object.keys(rankGroups)) {
     let groupCards = rankGroups[rank];
 
@@ -2235,20 +2258,20 @@ function performOneBotMeldActionInRoom(room, botIdx) {
         const duplicateCount = botHand.filter(c => c.id !== card.id && c.suit === card.suit && c.rank === card.rank).length;
         if (duplicateCount > 0) return true; // Si está repetida, se puede usar sin problema
 
-        const cardVal = rankOrder[card.rank] || 0;
+        const cardVal = BOT_RANK_ORDER[card.rank] || 0;
         // Vecino directo a distancia 1 (ej. 7 y 8 de trébol)
         const hasDirectNeighborInHand = botHand.some(c => 
           c.id !== card.id && 
           c.suit === card.suit && 
           c.rank !== '2' && 
           c.rank !== 'Joker' && 
-          Math.abs((rankOrder[c.rank] || 0) - cardVal) === 1
+          Math.abs((BOT_RANK_ORDER[c.rank] || 0) - cardVal) === 1
         );
 
         // Conecta directamente con una escalera propia ya bajada en mesa de ese mismo palo
         const connectsToTableRun = botMelds.some(m => {
           if (m.length > 0 && m[0].suit === card.suit) {
-            const rankVals = m.map(mc => rankOrder[mc.representedRank || mc.rank]).filter(Boolean);
+            const rankVals = m.map(mc => BOT_RANK_ORDER[mc.representedRank || mc.rank]).filter(Boolean);
             if (rankVals.length > 0) {
               const minVal = Math.min(...rankVals);
               const maxVal = Math.max(...rankVals);
@@ -2538,16 +2561,26 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
 // HELPER: Conexiones de cartas en la mano para la IA (escaleras y triadas)
 function getConnectionsCount(card, hand) {
   if (!card || card.rank === 'Joker' || card.rank === '2') return 0;
-  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
-  const cardVal = rankOrderVals[card.rank] || 0;
   
   let connects = 0;
+  const cardSlots = (card.rank === 'A') ? [1, 14] : [BOT_RANK_ORDER[card.rank] || 0];
+
   hand.forEach(c => {
     if (c.id !== card.id && c.rank !== 'Joker' && c.rank !== '2') {
       // 1. Conexión de escalera (mismo palo, distancia <= 2)
       if (c.suit === card.suit) {
-        const otherVal = rankOrderVals[c.rank] || 0;
-        if (Math.abs(cardVal - otherVal) <= 2) {
+        const otherSlots = (c.rank === 'A') ? [1, 14] : [BOT_RANK_ORDER[c.rank] || 0];
+        let hasConn = false;
+        for (const s1 of cardSlots) {
+          for (const s2 of otherSlots) {
+            if (Math.abs(s1 - s2) <= 2) {
+              hasConn = true;
+              break;
+            }
+          }
+          if (hasConn) break;
+        }
+        if (hasConn) {
           connects++;
         }
       }
