@@ -1356,10 +1356,15 @@ io.on('connection', (socket) => {
       room.globalScores[1] += roundPointsTeam1;
 
       const currentHistory = gameState.roundHistory || [];
+      const currentRoundNum = currentHistory.length + 1;
       currentHistory.push({
-        roundNumber: currentHistory.length + 1,
-        breakdown: roundBreakdown,
-        accumulatedScores: [...room.globalScores]
+        round: currentRoundNum,
+        roundNumber: currentRoundNum,
+        totals: [roundPointsTeam0, roundPointsTeam1],
+        roundScores: [roundPointsTeam0, roundPointsTeam1],
+        accumulated: [...room.globalScores],
+        accumulatedScores: [...room.globalScores],
+        breakdown: roundBreakdown
       });
 
       const currentTargetScore = gameState.targetScore || room.targetScoreSetting || 3000;
@@ -1369,6 +1374,7 @@ io.on('connection', (socket) => {
         gameState.turnState = 'match-over';
         gameState.scores = [...room.globalScores];
         gameState.roundHistory = currentHistory;
+        gameState.winner = room.globalScores[0] >= room.globalScores[1] ? 0 : 1;
         sendStateToRoom(room);
         return;
       }

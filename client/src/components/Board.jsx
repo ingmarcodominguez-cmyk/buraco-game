@@ -1290,8 +1290,9 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
               <div style={{ fontSize: '0.8rem', color: '#94a3b8' }}>
                 Jugadores: <span style={{ color: '#fff', fontWeight: 600 }}>{lobbyPlayers.join(' vs ')}</span>
               </div>
-              <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px' }}>
-                Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canasta' : 'Canastas'} para ganar</span>
+              <div style={{ fontSize: '0.8rem', color: '#94a3b8', marginTop: '4px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span>Requisito: <span style={{ color: '#fbbf24', fontWeight: 600 }}>{gameState.requiredCanastras || 1} {gameState.requiredCanastras === 1 ? 'Canasta' : 'Canastas'}</span></span>
+                <span>Ronda: <span style={{ color: '#34d399', fontWeight: 700 }}>{(gameState.roundHistory?.length || 0) + 1}</span></span>
               </div>
             </div>
 
@@ -1299,27 +1300,44 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
             {gameState.roundHistory && gameState.roundHistory.length > 0 && (
               <div className="sidebar-section" style={{ borderTop: '1px solid var(--glass-border)' }}>
                 <h2 className="sidebar-title" style={{ color: '#34d399', marginBottom: '8px' }}>Planilla de Rondas</h2>
-                <div style={{ maxHeight: '120px', overflowY: 'auto', fontSize: '0.72rem' }}>
+                <div style={{ maxHeight: '140px', overflowY: 'auto', fontSize: '0.72rem' }}>
                   <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left' }}>
                     <thead>
                       <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.1)', color: '#94a3b8' }}>
-                        <th style={{ padding: '3px 4px' }}>Ronda</th>
-                        <th style={{ padding: '3px 4px' }}>{gameState.players?.[0]?.name || 'J1'}</th>
-                        <th style={{ padding: '3px 4px' }}>{gameState.players?.[1]?.name || 'J2'}</th>
+                        <th style={{ padding: '4px' }}>Ronda</th>
+                        <th style={{ padding: '4px', textAlign: 'center' }}>
+                          {is4P ? `${gameState.players?.[0]?.name || 'Sur'} & ${gameState.players?.[2]?.name || 'Norte'}` : (gameState.players?.[0]?.name || 'J1')}
+                        </th>
+                        <th style={{ padding: '4px', textAlign: 'center' }}>
+                          {is4P ? `${gameState.players?.[1]?.name || 'Este'} & ${gameState.players?.[3]?.name || 'Oeste'}` : (gameState.players?.[1]?.name || 'J2')}
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
-                      {gameState.roundHistory && gameState.roundHistory.map((rh, idx) => (
-                        <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
-                          <td style={{ padding: '3px 4px', fontWeight: 'bold' }}>R{rh.round}</td>
-                          <td style={{ padding: '3px 4px', color: (rh.totals?.[0] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
-                            {(rh.totals?.[0] || 0) >= 0 ? `+${rh.totals?.[0] || 0}` : rh.totals?.[0] || 0}
-                          </td>
-                          <td style={{ padding: '3px 4px', color: (rh.totals?.[1] || 0) >= 0 ? '#34d399' : '#ef4444' }}>
-                            {(rh.totals?.[1] || 0) >= 0 ? `+${rh.totals?.[1] || 0}` : rh.totals?.[1] || 0}
-                          </td>
-                        </tr>
-                      ))}
+                      {gameState.roundHistory.map((rh, idx) => {
+                        const roundNum = rh.round ?? rh.roundNumber ?? (idx + 1);
+                        const t0 = rh.totals?.[0] ?? rh.roundScores?.[0] ?? rh.breakdown?.p0?.roundTotal ?? rh.breakdown?.team0?.roundTotal ?? rh.breakdown?.team0?.totalRound ?? 0;
+                        const t1 = rh.totals?.[1] ?? rh.roundScores?.[1] ?? rh.breakdown?.p1?.roundTotal ?? rh.breakdown?.team1?.roundTotal ?? rh.breakdown?.team1?.totalRound ?? 0;
+                        const acc0 = rh.accumulated?.[0] ?? rh.accumulatedScores?.[0];
+                        const acc1 = rh.accumulated?.[1] ?? rh.accumulatedScores?.[1];
+                        return (
+                          <tr key={idx} style={{ borderBottom: '1px solid rgba(255,255,255,0.03)' }}>
+                            <td style={{ padding: '4px', fontWeight: 'bold' }}>R{roundNum}</td>
+                            <td style={{ padding: '4px', textAlign: 'center', color: t0 >= 0 ? '#34d399' : '#ef4444' }}>
+                              {t0 >= 0 ? `+${t0}` : t0}
+                              {acc0 !== undefined && (
+                                <span style={{ fontSize: '0.65rem', color: '#94a3b8', marginLeft: '3px' }}>({acc0})</span>
+                              )}
+                            </td>
+                            <td style={{ padding: '4px', textAlign: 'center', color: t1 >= 0 ? '#34d399' : '#ef4444' }}>
+                              {t1 >= 0 ? `+${t1}` : t1}
+                              {acc1 !== undefined && (
+                                <span style={{ fontSize: '0.65rem', color: '#94a3b8', marginLeft: '3px' }}>({acc1})</span>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
@@ -1433,13 +1451,24 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                       </tr>
                     </thead>
                     <tbody>
-                      {gameState.roundHistory.map((rh, index) => (
-                        <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                          <td style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8' }}>#{rh.round}</td>
-                          <td style={{ padding: '6px 4px', textAlign: 'center', color: '#10b981' }}>{rh.totals?.[0] || 0} pts ({rh.accumulated?.[0] || 0})</td>
-                          <td style={{ padding: '6px 4px', textAlign: 'center', color: '#3b82f6' }}>{rh.totals?.[1] || 0} pts ({rh.accumulated?.[1] || 0})</td>
-                        </tr>
-                      ))}
+                      {gameState.roundHistory.map((rh, index) => {
+                        const roundNum = rh.round ?? rh.roundNumber ?? (index + 1);
+                        const t0 = rh.totals?.[0] ?? rh.roundScores?.[0] ?? rh.breakdown?.p0?.roundTotal ?? rh.breakdown?.team0?.roundTotal ?? rh.breakdown?.team0?.totalRound ?? 0;
+                        const t1 = rh.totals?.[1] ?? rh.roundScores?.[1] ?? rh.breakdown?.p1?.roundTotal ?? rh.breakdown?.team1?.roundTotal ?? rh.breakdown?.team1?.totalRound ?? 0;
+                        const acc0 = rh.accumulated?.[0] ?? rh.accumulatedScores?.[0] ?? 0;
+                        const acc1 = rh.accumulated?.[1] ?? rh.accumulatedScores?.[1] ?? 0;
+                        return (
+                          <tr key={index} style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                            <td style={{ padding: '6px 4px', textAlign: 'center', color: '#94a3b8' }}>#{roundNum}</td>
+                            <td style={{ padding: '6px 4px', textAlign: 'center', color: '#10b981' }}>
+                              {t0 >= 0 ? `+${t0}` : t0} pts ({acc0})
+                            </td>
+                            <td style={{ padding: '6px 4px', textAlign: 'center', color: '#3b82f6' }}>
+                              {t1 >= 0 ? `+${t1}` : t1} pts ({acc1})
+                            </td>
+                          </tr>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
