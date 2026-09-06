@@ -39,6 +39,13 @@ export default function App() {
   const [errorMessage, setErrorMessage] = useState('');
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [isDevAuthorized, setIsDevAuthorized] = useState(() => sessionStorage.getItem('buraco_dev_auth') === 'true');
+  const [showDevModal, setShowDevModal] = useState(false);
+  const [devPasswordInput, setDevPasswordInput] = useState('');
+  const [devErrorMsg, setDevErrorMsg] = useState('');
+  const [devSuccessMsg, setDevSuccessMsg] = useState('');
+  const [showExitConfirm, setShowExitConfirm] = useState(false);
+  const [showSimulateConfirm, setShowSimulateConfirm] = useState(false);
+  const [showExitGameConfirm, setShowExitGameConfirm] = useState(false);
 
   const handleRoomChange = (newRoomId) => {
     setCurrentRoomId(newRoomId);
@@ -49,23 +56,37 @@ export default function App() {
 
   const handleToggleDevAuth = () => {
     if (isDevAuthorized) {
-      if (window.confirm('¿Deseas salir del Modo Desarrollador y volver al Modo Producción?')) {
-        sessionStorage.removeItem('buraco_dev_auth');
-        localStorage.removeItem('buraco_dev_mode');
-        setIsDevAuthorized(false);
-      }
+      setShowExitConfirm(true);
     } else {
-      const inputPass = window.prompt('Ingresa la clave de desarrollador para activar las herramientas de depuración:');
-      if (inputPass === null) return;
-      if (inputPass === 'lom@lind@') {
-        sessionStorage.setItem('buraco_dev_auth', 'true');
-        localStorage.setItem('buraco_dev_mode', 'true');
-        setIsDevAuthorized(true);
-        alert('✅ Modo Desarrollador activado. Las cartas de la IA ahora son visibles en tiempo real.');
-      } else {
-        alert('❌ Clave incorrecta. Permaneciendo en modo producción.');
-      }
+      setDevPasswordInput('');
+      setDevErrorMsg('');
+      setDevSuccessMsg('');
+      setShowDevModal(true);
     }
+  };
+
+  const handleDevSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (devPasswordInput === 'lom@lind@') {
+      sessionStorage.setItem('buraco_dev_auth', 'true');
+      localStorage.setItem('buraco_dev_mode', 'true');
+      setIsDevAuthorized(true);
+      setDevSuccessMsg('✅ Modo Desarrollador activado con éxito.');
+      setTimeout(() => {
+        setShowDevModal(false);
+        setDevSuccessMsg('');
+        setDevPasswordInput('');
+      }, 700);
+    } else {
+      setDevErrorMsg('❌ Clave incorrecta. Intenta nuevamente.');
+    }
+  };
+
+  const handleConfirmExitDev = () => {
+    sessionStorage.removeItem('buraco_dev_auth');
+    localStorage.removeItem('buraco_dev_mode');
+    setIsDevAuthorized(false);
+    setShowExitConfirm(false);
   };
 
   useEffect(() => {
@@ -99,18 +120,36 @@ export default function App() {
   };
 
   useEffect(() => {
-    socket.on('connect', () => {
+    const handleConnect = () => {
       setConnected(true);
       console.log('Conectado al servidor de sockets');
-    });
 
-    socket.on('disconnect', () => {
+      // Si el jugador estaba en una mesa o partida activa, reconectar automáticamente
+      const inGame = sessionStorage.getItem('buraco_in_game') === 'true';
+      const storedName = playerName || localStorage.getItem('buraco_player_name');
+      const storedRoom = currentRoomId || localStorage.getItem('buraco_room') || 'mesa-1';
+
+      if (inGame && storedName) {
+        console.log(`Reconectando automáticamente a ${storedRoom} como ${storedName}...`);
+        socket.emit('join-lobby', { 
+          name: storedName, 
+          requiredCanastras: selectedCanastras, 
+          isAgainstBot: isAgainstBotSetting, 
+          targetScore: selectedTargetScore, 
+          is4Player: is4PlayerSetting,
+          roomId: storedRoom
+        });
+      }
+    };
+
+    const handleDisconnect = () => {
       setConnected(false);
-      setGameState(null);
-      setJoined(false);
-      setPlayerIndex(null);
-      console.log('Desconectado del servidor de sockets');
-    });
+      // ¡IMPORTANTE! NO destruir gameState ni resetear joined aquí para no expulsar al usuario al Lobby en cortes transitorios.
+      console.log('Desconexión temporal del servidor de sockets. Esperando reconexión...');
+    };
+
+    socket.on('connect', handleConnect);
+    socket.on('disconnect', handleDisconnect);
 
     // Información inicial del lobby
     socket.on('lobby-info', ({ localIp, players, roomId }) => {
@@ -146,38 +185,34 @@ export default function App() {
       setLobbyPlayers(lobbyPlayers || []);
       if (roomId) {
         setCurrentRoomId(roomId);
+        try {
+          localStorage.setItem('buraco_room', roomId);
+        } catch (e) {}
       }
       setJoined(true);
+      sessionStorage.setItem('buraco_in_game', 'true');
     });
 
     // Errores del juego (movimiento inválido, etc.)
     socket.on('error-message', (msg) => {
       setErrorMessage(msg);
+      // Si la sala está ocupada o llena para un usuario que aún no estaba en partida
+      if (sessionStorage.getItem('buraco_in_game') !== 'true') {
+        setJoined(false);
+      }
     });
 
     // Escuchar si la partida fue abortada por otro jugador
     socket.on('game-aborted', (msg) => {
-      alert(msg);
-      window.location.reload();
-    });
-
-    // Manejar re-conexión automática si ya teníamos un nombre ingresado
-    socket.on('reconnect', () => {
-      if (playerName) {
-        socket.emit('join-lobby', { 
-          name: playerName, 
-          requiredCanastras: selectedCanastras, 
-          isAgainstBot: isAgainstBotSetting, 
-          targetScore: selectedTargetScore, 
-          is4Player: is4PlayerSetting,
-          roomId: currentRoomId
-        });
-      }
+      sessionStorage.removeItem('buraco_in_game');
+      setGameState(null);
+      setJoined(false);
+      setErrorMessage(msg);
     });
 
     return () => {
-      socket.off('connect');
-      socket.off('disconnect');
+      socket.off('connect', handleConnect);
+      socket.off('disconnect', handleDisconnect);
       socket.off('lobby-info');
       socket.off('lobby-update');
       socket.off('rooms-summary');
@@ -205,6 +240,11 @@ export default function App() {
     setIs4PlayerSetting(is4Player);
     setCurrentRoomId(roomId);
     setJoined(true);
+    sessionStorage.setItem('buraco_in_game', 'true');
+    try {
+      localStorage.setItem('buraco_room', roomId);
+      localStorage.setItem('buraco_player_name', name);
+    } catch (e) {}
     socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player, roomId });
   };
 
@@ -311,11 +351,7 @@ export default function App() {
                 {isDevAuthorized && gameState && gameState.status === 'playing' && (
                   <button 
                     className="btn-header" 
-                    onClick={() => {
-                      if (window.confirm('¿Quieres simular que el jugador actual bate la ronda para probar la pantalla de corte?')) {
-                        socket.emit('debug-simulate-batida', { pass: 'lom@lind@' });
-                      }
-                    }}
+                    onClick={() => setShowSimulateConfirm(true)}
                     style={{ 
                       display: 'flex', 
                       alignItems: 'center', 
@@ -331,14 +367,7 @@ export default function App() {
                 )}
                 <button 
                   className="btn-header" 
-                  onClick={() => {
-                    if (window.confirm('¿Quieres salir de la partida actual? El juego se cancelará para todos.')) {
-                      socket.emit('leave-game');
-                      setTimeout(() => {
-                        window.location.reload();
-                      }, 200);
-                    }
-                  }}
+                  onClick={() => setShowExitGameConfirm(true)}
                   style={{ display: 'flex', alignItems: 'center', gap: '6px' }}
                 >
                   <LogOut size={14} /> Salir
@@ -347,6 +376,345 @@ export default function App() {
             )}
           </div>
         </header>
+      )}
+
+      {/* Indicador de reconexión si se pierde conexión momentáneamente durante la partida */}
+      {gameState && !connected && (
+        <div 
+          className="glass-panel"
+          style={{
+            position: 'fixed',
+            bottom: '20px',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 9999,
+            padding: '10px 20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            backgroundColor: 'rgba(245, 158, 11, 0.25)',
+            borderColor: 'rgba(245, 158, 11, 0.5)',
+            color: '#fbbf24',
+            fontWeight: 600,
+            borderRadius: '10px',
+            boxShadow: '0 8px 20px rgba(0, 0, 0, 0.5)',
+            fontSize: '0.9rem'
+          }}
+        >
+          <span>⚡</span>
+          <span>Reconectando con el servidor... Conservando tu partida.</span>
+        </div>
+      )}
+
+      {/* MODAL 1: Ingreso de Clave de Desarrollador (Sin window.prompt ni bloqueos) */}
+      {showDevModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000
+        }}>
+          <div className="glass-panel" style={{
+            width: '90%',
+            maxWidth: '420px',
+            padding: '24px',
+            borderRadius: '16px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(56, 189, 248, 0.3)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🔑</div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
+              Modo Desarrollador
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '20px', lineHeight: 1.4 }}>
+              Ingresa la clave de acceso para activar las herramientas de depuración y ver las cartas de la IA en tiempo real.
+            </p>
+
+            <form onSubmit={handleDevSubmit}>
+              <input 
+                type="password"
+                autoFocus
+                placeholder="Ingresa la contraseña..."
+                value={devPasswordInput}
+                onChange={(e) => {
+                  setDevPasswordInput(e.target.value);
+                  setDevErrorMsg('');
+                }}
+                style={{
+                  width: '100%',
+                  padding: '12px 16px',
+                  borderRadius: '10px',
+                  background: 'rgba(30, 41, 59, 0.9)',
+                  border: devErrorMsg ? '1px solid #ef4444' : '1px solid rgba(255,255,255,0.15)',
+                  color: '#fff',
+                  fontSize: '1rem',
+                  outline: 'none',
+                  boxSizing: 'border-box',
+                  marginBottom: '12px'
+                }}
+              />
+
+              {devErrorMsg && (
+                <div style={{ color: '#ef4444', fontSize: '0.82rem', marginBottom: '14px', fontWeight: 600 }}>
+                  {devErrorMsg}
+                </div>
+              )}
+              {devSuccessMsg && (
+                <div style={{ color: '#10b981', fontSize: '0.82rem', marginBottom: '14px', fontWeight: 600 }}>
+                  {devSuccessMsg}
+                </div>
+              )}
+
+              <div style={{ display: 'flex', gap: '10px', justifyContent: 'center', marginTop: '10px' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowDevModal(false);
+                    setDevErrorMsg('');
+                    setDevPasswordInput('');
+                  }}
+                  style={{
+                    padding: '10px 18px',
+                    borderRadius: '8px',
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid rgba(255,255,255,0.15)',
+                    color: '#cbd5e1',
+                    fontWeight: 600,
+                    cursor: 'pointer'
+                  }}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: '8px',
+                    background: 'linear-gradient(135deg, #0ea5e9, #0284c7)',
+                    border: 'none',
+                    color: '#fff',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    boxShadow: '0 4px 12px rgba(14, 165, 233, 0.3)'
+                  }}
+                >
+                  Desbloquear
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 2: Confirmar Salida de Modo Desarrollador */}
+      {showExitConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000
+        }}>
+          <div className="glass-panel" style={{
+            width: '90%',
+            maxWidth: '400px',
+            padding: '24px',
+            borderRadius: '16px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(255, 255, 255, 0.15)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🔒</div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
+              ¿Salir de Modo Desarrollador?
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '20px' }}>
+              Las cartas de la IA volverán a ocultarse y se regresará al modo de producción normal.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowExitConfirm(false)}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#cbd5e1',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Mantener Activo
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmExitDev}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  background: '#ef4444',
+                  border: 'none',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Salir a Producción
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 3: Confirmar Simulación de Corte */}
+      {showSimulateConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000
+        }}>
+          <div className="glass-panel" style={{
+            width: '90%',
+            maxWidth: '400px',
+            padding: '24px',
+            borderRadius: '16px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(245, 158, 11, 0.4)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: '8px' }}>⚡</div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
+              Simular Batida de Ronda
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '20px' }}>
+              ¿Quieres simular que el jugador actual bate la ronda para probar la pantalla de corte y cálculo de puntajes?
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowSimulateConfirm(false)}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#cbd5e1',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  socket.emit('debug-simulate-batida', { pass: 'lom@lind@' });
+                  setShowSimulateConfirm(false);
+                }}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  background: '#f59e0b',
+                  border: 'none',
+                  color: '#000',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Simular Corte
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL 4: Confirmar Salida de Partida */}
+      {showExitGameConfirm && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000
+        }}>
+          <div className="glass-panel" style={{
+            width: '90%',
+            maxWidth: '400px',
+            padding: '24px',
+            borderRadius: '16px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(239, 68, 68, 0.4)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '2rem', marginBottom: '8px' }}>🚪</div>
+            <h2 style={{ fontSize: '1.2rem', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
+              ¿Abandonar la partida?
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '20px' }}>
+              Al salir, se cancelará la mesa actual para todos los jugadores.
+            </p>
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowExitGameConfirm(false)}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#cbd5e1',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Quedarme
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  socket.emit('leave-game');
+                  sessionStorage.removeItem('buraco_in_game');
+                  setShowExitGameConfirm(false);
+                  setTimeout(() => {
+                    window.location.reload();
+                  }, 200);
+                }}
+                style={{
+                  padding: '10px 20px',
+                  borderRadius: '8px',
+                  background: '#ef4444',
+                  border: 'none',
+                  color: '#fff',
+                  fontWeight: 700,
+                  cursor: 'pointer'
+                }}
+              >
+                Sí, Salir
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Contenido principal: Lobby o Tablero */}

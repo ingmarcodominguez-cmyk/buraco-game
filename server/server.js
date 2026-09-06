@@ -556,69 +556,111 @@ io.on('connection', (socket) => {
 
     if (room.isAgainstBotSetting) {
       if (room.is4PlayerSetting) {
-        const existingIndex = room.players.findIndex(p => p.name === name);
+        const existingIndex = room.players.findIndex(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
         if (existingIndex !== -1) {
           room.players[existingIndex].socketId = socket.id;
-          console.log(`Humano se reconectó a sala 4P ${cleanRoomId}: ${name}`);
+          room.players[existingIndex].name = cleanName;
+          if (room.gameState && room.gameState.players && room.gameState.players[existingIndex]) {
+            room.gameState.players[existingIndex].name = cleanName;
+          }
+          console.log(`Humano se reconectó a sala 4P ${cleanRoomId}: ${cleanName} (slot ${existingIndex})`);
         } else {
-          const humanCount = room.players.filter(p => !p.isBot).length;
-          if (humanCount < 2) {
-            room.players = room.players.filter(p => !p.isBot);
-            room.players.push({ socketId: socket.id, name });
-            console.log(`Humano ${room.players.length} unido a sala 4P ${cleanRoomId}: ${name}`);
+          // Si hay una partida en curso y hay un slot humano desconectado
+          const disconnectedHumanIdx = room.players.findIndex(p => !p.isBot && !p.socketId);
+          if (disconnectedHumanIdx !== -1 && room.gameState) {
+            room.players[disconnectedHumanIdx].socketId = socket.id;
+            room.players[disconnectedHumanIdx].name = cleanName;
+            if (room.gameState.players && room.gameState.players[disconnectedHumanIdx]) {
+              room.gameState.players[disconnectedHumanIdx].name = cleanName;
+            }
+            console.log(`Humano ocupó slot desconectado en sala 4P ${cleanRoomId}: ${cleanName}`);
           } else {
-            socket.emit('error-message', 'La partida contra la PC en esta sala está llena (ya hay 2 humanos).');
-            return;
+            const humanCount = room.players.filter(p => !p.isBot).length;
+            if (humanCount < 2) {
+              if (!room.gameState) {
+                room.players = room.players.filter(p => !p.isBot);
+                room.players.push({ socketId: socket.id, name: cleanName });
+                console.log(`Humano ${room.players.length} unido a sala 4P ${cleanRoomId}: ${cleanName}`);
+              } else {
+                socket.emit('error-message', 'La partida 4P ya está en curso.');
+                return;
+              }
+            } else {
+              socket.emit('error-message', 'La partida contra la PC en esta sala está llena (ya hay 2 humanos).');
+              return;
+            }
           }
         }
         
-        const activeHumans = room.players.filter(p => !p.isBot);
-        if (activeHumans.length === 2) {
-          room.players = [
-            activeHumans[0],
-            activeHumans[1],
-            { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
-            { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
-          ];
+        // Solo configurar bots iniciales si la partida no ha comenzado (evitar alterar sorteo de asientos)
+        if (!room.gameState) {
+          const activeHumans = room.players.filter(p => !p.isBot);
+          if (activeHumans.length === 2) {
+            room.players = [
+              activeHumans[0],
+              activeHumans[1],
+              { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
+              { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
+            ];
+          }
         }
       } else {
         // Modo 2 jugadores con PC
-        const isReconnecting = room.gameState && room.players[0] && room.players[0].name === name && room.players[1] && room.players[1].isBot;
+        const humanIdx = room.players.findIndex(p => !p.isBot);
+        const isReconnecting = room.gameState && humanIdx !== -1 && (
+          (room.players[humanIdx] && room.players[humanIdx].name && room.players[humanIdx].name.trim().toLowerCase() === cleanName.toLowerCase()) ||
+          !room.players[humanIdx].socketId ||
+          room.players[humanIdx].socketId === socket.id
+        );
 
         if (isReconnecting) {
-          room.players[0].socketId = socket.id;
-          console.log(`Jugador se reconectó a su partida contra la PC en sala ${cleanRoomId}: ${name}`);
+          room.players[humanIdx].socketId = socket.id;
+          room.players[humanIdx].name = cleanName;
+          if (room.gameState.players && room.gameState.players[humanIdx]) {
+            room.gameState.players[humanIdx].name = cleanName;
+          }
+          console.log(`Jugador se reconectó a su partida contra la PC en sala ${cleanRoomId}: ${cleanName} (asiento ${humanIdx})`);
         } else {
           room.players = [
-            { socketId: socket.id, name },
+            { socketId: socket.id, name: cleanName },
             { socketId: 'bot-socket', name: 'Computadora (IA)', isBot: true }
           ];
           room.gameState = null;
           room.globalScores = [0, 0];
           room.isBotThinking = false;
-          console.log(`Partida contra la PC iniciada en sala ${cleanRoomId} para ${name}`);
+          console.log(`Partida contra la PC iniciada en sala ${cleanRoomId} para ${cleanName}`);
         }
       }
     } else {
       // Modo multijugador humano completo
       const existingIndex = room.players.findIndex(p => p.socketId === socket.id);
       if (existingIndex !== -1) {
-        room.players[existingIndex].name = name;
+        room.players[existingIndex].name = cleanName;
+        if (room.gameState && room.gameState.players && room.gameState.players[existingIndex]) {
+          room.gameState.players[existingIndex].name = cleanName;
+        }
       } else {
-        const sameNameIndex = room.players.findIndex(p => p.name === name);
+        const sameNameIndex = room.players.findIndex(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
         if (sameNameIndex !== -1) {
           room.players[sameNameIndex].socketId = socket.id;
-          console.log(`Jugador reconectado por nombre en sala ${cleanRoomId}: ${name}`);
+          room.players[sameNameIndex].name = cleanName;
+          if (room.gameState && room.gameState.players && room.gameState.players[sameNameIndex]) {
+            room.gameState.players[sameNameIndex].name = cleanName;
+          }
+          console.log(`Jugador reconectado por nombre en sala ${cleanRoomId}: ${cleanName} (asiento ${sameNameIndex})`);
         } else {
           const disconnectedIndex = room.players.findIndex(p => !p.socketId && !p.isBot);
           if (disconnectedIndex !== -1) {
-            room.players[disconnectedIndex] = { socketId: socket.id, name };
-            console.log(`Jugador ocupó slot desconectado en sala ${cleanRoomId}: ${name}`);
-          } else if (room.players.length < maxPlayers) {
-            room.players.push({ socketId: socket.id, name });
-            console.log(`Jugador nuevo unido a sala ${cleanRoomId}: ${name}`);
+            room.players[disconnectedIndex] = { socketId: socket.id, name: cleanName };
+            if (room.gameState && room.gameState.players && room.gameState.players[disconnectedIndex]) {
+              room.gameState.players[disconnectedIndex].name = cleanName;
+            }
+            console.log(`Jugador ocupó slot desconectado en sala ${cleanRoomId}: ${cleanName}`);
+          } else if (room.players.length < maxPlayers && !room.gameState) {
+            room.players.push({ socketId: socket.id, name: cleanName });
+            console.log(`Jugador nuevo unido a sala ${cleanRoomId}: ${cleanName}`);
           } else {
-            socket.emit('error-message', `La sala ${cleanRoomId} está llena (ya hay ${maxPlayers} jugadores).`);
+            socket.emit('error-message', `La sala ${cleanRoomId} está llena o ya tiene una partida en curso.`);
             return;
           }
         }
@@ -664,6 +706,7 @@ io.on('connection', (socket) => {
         }
       }
       sendStateToRoom(room);
+      checkAndTriggerBotTurnInRoom(room);
       io.emit('rooms-summary', getRoomsSummary());
     } else {
       io.to(cleanRoomId).emit('lobby-update', { roomId: cleanRoomId, players: room.players.map(p => p.name) });
@@ -1274,7 +1317,7 @@ io.on('connection', (socket) => {
 
     const activeHumans = room.players.filter(p => p.socketId && !p.socketId.startsWith('bot-socket') && !p.isBot);
     if (activeHumans.length === 0) {
-      console.log(`Sala ${room.id} vacía de humanos. Programando limpieza diferida en 20 segundos.`);
+      console.log(`Sala ${room.id} vacía de humanos. Programando limpieza diferida en 60 segundos.`);
       if (room.cleanupTimeout) clearTimeout(room.cleanupTimeout);
       room.cleanupTimeout = setTimeout(() => {
         const stillNoHumans = room.players.filter(p => p.socketId && !p.socketId.startsWith('bot-socket') && !p.isBot).length === 0;
@@ -1285,7 +1328,7 @@ io.on('connection', (socket) => {
           io.emit('rooms-summary', getRoomsSummary());
         }
         room.cleanupTimeout = null;
-      }, 20000);
+      }, 60000);
     }
     io.emit('rooms-summary', getRoomsSummary());
   });
