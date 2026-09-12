@@ -320,15 +320,6 @@ function checkMortoDirectInRoom(room, playerIdx) {
   const hasTaken = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[teamIdx];
 
   if (player.hand.length === 0 && !hasTaken) {
-    const teamMelds = gameState.players[teamIdx].melds;
-    let totalPointsInMesa = 0;
-    teamMelds.forEach(meld => {
-      meld.forEach(c => {
-        totalPointsInMesa += CARD_VALUES[c.rank] || 0;
-      });
-    });
-    if (totalPointsInMesa > 0 && totalPointsInMesa < 30) return false;
-
     let mortoIdx = -1;
     if (gameState.mortos[0]) mortoIdx = 0;
     else if (gameState.mortos[1]) mortoIdx = 1;
@@ -1007,20 +998,6 @@ io.on('connection', (socket) => {
     const teamMelds = gameState.players[teamIdx].melds;
     const canastrasCount = teamMelds.filter(m => m.length >= 7).length;
     const requiredCanastras = gameState.requiredCanastras || 1;
-
-    // REGLA DE APERTURA: 30 PUNTOS TOTALES EN MESA
-    // Si el equipo bajó juegos pero en total no alcanzan los 30 puntos requeridos para abrir:
-    let totalPointsInMesa = 0;
-    teamMelds.forEach(meld => {
-      meld.forEach(c => {
-        totalPointsInMesa += CARD_VALUES[c.rank] || 0;
-      });
-    });
-
-    if (totalPointsInMesa > 0 && totalPointsInMesa < 30) {
-      socket.emit('error-message', `Para abrir por primera vez, tus juegos bajados deben sumar al menos 30 puntos en total (actualmente sumas ${totalPointsInMesa} pts en mesa). Debes bajar otro juego para completar los 30 puntos o deshacer tu jugada.`);
-      return;
-    }
 
     // Batida final (cierre con descarte)
     if (hand.length === 1 && hasTakenMorto) {
@@ -2106,15 +2083,7 @@ function performOneBotMeldActionInRoom(room, botIdx) {
       botMeldPoints += CARD_VALUES[c.rank] || 0;
     });
   });
-  const isAlreadyMelded = botMeldPoints >= 30;
-
-  // Comprobar apertura inicial de 30 puntos si no está bajado
-  if (!isAlreadyMelded) {
-    const openingSim = simulateBotMelding(botHand, botMelds);
-    if (botMeldPoints + openingSim.points < 30) {
-      return false; // No podemos bajar nada aún porque no sumamos 30
-    }
-  }
+  const isAlreadyMelded = botMelds.length > 0;
 
   // Simular jugadas usando el simulador unificado para estimar cartas jugadas
   const sim = simulateBotMelding(botHand, botMelds);
