@@ -473,11 +473,12 @@ io.on('connection', (socket) => {
     // Humanos activos en esta sala (distintos de este socket)
     const activeHumans = room.players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
     const hasActiveGame = room.gameState && (room.gameState.status === 'playing' || room.gameState.status === 'finished-visual');
-    const isPlayerReconnecting = room.players.some(p => p.name.toLowerCase() === cleanName.toLowerCase() && (!p.socketId || p.socketId === socket.id));
+    const isPlayerReconnecting = room.players.some(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
 
-    // Si la partida anterior ya finalizó en esta sala y no hay humanos activos, limpiar
-    if (room.gameState && room.gameState.status === 'finished' && activeHumans.length === 0) {
-      console.log(`La partida anterior en sala ${cleanRoomId} ya finalizó. Limpiando sala.`);
+    // Si la partida anterior ya finalizó por completo en esta sala y no hay humanos activos, limpiar
+    // NOTA: Solo limpiar si el match terminó definitivamente (match-over), NO entre rondas
+    if (room.gameState && room.gameState.turnState === 'match-over' && activeHumans.length === 0) {
+      console.log(`La partida anterior en sala ${cleanRoomId} ya finalizó por completo. Limpiando sala.`);
       room.players = [];
       room.gameState = null;
       room.globalScores = [0, 0];
