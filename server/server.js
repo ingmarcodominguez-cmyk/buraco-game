@@ -110,6 +110,11 @@ class BuracoRoom {
     this.isBotThinking = false;
     this.botTurnTimeout = null;
     this.createdAt = Date.now();
+    this.aiMemory = {
+      knownOpponentHands: {}, // playerIdx -> Card[] (cartas levantadas del pozo que aún conserva)
+      discardHistory: [],     // Card[] (historial de cartas descartadas durante la ronda)
+      botHeldHistory: []      // Card[] (cartas que el bot tuvo en mano)
+    };
   }
 }
 
@@ -137,6 +142,81 @@ function findRoomBySocketId(socketId) {
 function getTeamOwnerIndex(playerIdx, is4Player) {
   if (!is4Player) return playerIdx;
   return playerIdx === 0 || playerIdx === 2 ? 0 : 1;
+}
+
+// ============================================================================
+// MEMORIA DE INFORMACIÓN PÚBLICA Y RASTREO TÁCTICO DE LA IA
+// ============================================================================
+function getAIMemory(room) {
+  if (!room) return { knownOpponentHands: {}, discardHistory: [], botHeldHistory: [] };
+  if (!room.aiMemory) {
+    room.aiMemory = {
+      knownOpponentHands: {},
+      discardHistory: [],
+      botHeldHistory: []
+    };
+  }
+  return room.aiMemory;
+}
+
+function resetAIMemory(room) {
+  if (!room) return;
+  room.aiMemory = {
+    knownOpponentHands: {},
+    discardHistory: [],
+    botHeldHistory: []
+  };
+}
+
+function recordOpponentDrawDiscard(room, playerIdx, cards) {
+  if (!room || !Array.isArray(cards)) return;
+  const mem = getAIMemory(room);
+  if (!mem.knownOpponentHands[playerIdx]) {
+    mem.knownOpponentHands[playerIdx] = [];
+  }
+  cards.forEach(c => {
+    if (c && c.rank !== 'hidden') {
+      mem.knownOpponentHands[playerIdx].push({
+        id: c.id,
+        suit: c.suit,
+        rank: c.rank,
+        value: c.value
+      });
+    }
+  });
+}
+
+function recordOpponentPlayedCards(room, playerIdx, cards) {
+  if (!room || !Array.isArray(cards)) return;
+  const mem = getAIMemory(room);
+  const known = mem.knownOpponentHands[playerIdx];
+  if (!known || known.length === 0) return;
+  cards.forEach(c => {
+    if (!c) return;
+    const idx = known.findIndex(kc => (c.id && kc.id === c.id) || (kc.suit === c.suit && kc.rank === c.rank));
+    if (idx !== -1) {
+      known.splice(idx, 1);
+    }
+  });
+}
+
+function recordDiscardCard(room, playerIdx, card) {
+  if (!room || !card) return;
+  const mem = getAIMemory(room);
+  recordOpponentPlayedCards(room, playerIdx, [card]);
+  mem.discardHistory.push({
+    id: card.id,
+    suit: card.suit,
+    rank: card.rank,
+    value: card.value
+  });
+}
+
+function recordMortoTaken(room, playerIdx) {
+  if (!room) return;
+  const mem = getAIMemory(room);
+  // Al agotar la mano para tomar el muerto, todas las cartas conocidas previas ya fueron jugadas/descartadas
+  mem.knownOpponentHands[playerIdx] = [];
 }
 
 function startPlayerTurnInRoom(room, playerIdx) {
@@ -325,6 +405,7 @@ function checkMortoDirectInRoom(room, playerIdx) {
     else if (gameState.mortos[1]) mortoIdx = 1;
 
     if (mortoIdx !== -1) {
+      recordMortoTaken(room, playerIdx);
       player.hand = gameState.mortos[mortoIdx];
       gameState.mortos[mortoIdx] = null;
       if (gameState.is4Player) {
@@ -359,6 +440,7 @@ function checkMortoIndirectInRoom(room, playerIdx) {
     else if (gameState.mortos[1]) mortoIdx = 1;
 
     if (mortoIdx !== -1) {
+      recordMortoTaken(room, playerIdx);
       player.hand = gameState.mortos[mortoIdx];
       gameState.mortos[mortoIdx] = null;
       if (gameState.is4Player) {
@@ -669,6 +751,7 @@ io.on('connection', (socket) => {
 
     if (room.players.length === maxPlayers && activeHumansCount === requiredHumans && allSocketsReady) {
       if (!room.gameState) {
+        resetAIMemory(room);
         room.gameState = initGame(room.is4PlayerSetting);
         const sorteoActionText = performSorteoInRoom(room, room.is4PlayerSetting);
         
@@ -801,6 +884,7 @@ io.on('connection', (socket) => {
     }
 
     const count = gameState.discardPile.length;
+    recordOpponentDrawDiscard(room, pIdx, gameState.discardPile);
     gameState.players[pIdx].hand.push(...gameState.discardPile);
     gameState.discardPile = [];
     
@@ -874,6 +958,7 @@ io.on('connection', (socket) => {
       const idx = hand.findIndex(hc => hc.id === cardToRem.id);
       if (idx !== -1) hand.splice(idx, 1);
     });
+    recordOpponentPlayedCards(room, pIdx, cards);
 
     gameState.players[teamIdx].melds.push(result.cards);
     gameState.lastAction = `${player.name} bajó juego: ${result.clean ? 'Limpio' : 'Sucio'} (${cards.length} cartas).`;
@@ -956,6 +1041,7 @@ io.on('connection', (socket) => {
       const idx = hand.findIndex(hc => hc.id === cardToRem.id);
       if (idx !== -1) hand.splice(idx, 1);
     });
+    recordOpponentPlayedCards(room, pIdx, cards);
 
     teamPlayer.melds[meldIndex] = result.cards;
     gameState.lastAction = `${player.name} acopló cartas a su juego.`;
@@ -1008,6 +1094,7 @@ io.on('connection', (socket) => {
       }
       
       const discarded = hand.splice(cardIdx, 1)[0];
+      recordDiscardCard(room, pIdx, discarded);
       gameState.discardPile.push(discarded);
       gameState.status = 'finished-visual';
       gameState.winner = pIdx;
@@ -1021,6 +1108,7 @@ io.on('connection', (socket) => {
     }
 
     const discarded = hand.splice(cardIdx, 1)[0];
+    recordDiscardCard(room, pIdx, discarded);
     gameState.discardPile.push(discarded);
     gameState.lastAction = `${player.name} descartó ${discarded.rank} de ${discarded.suit}.`;
 
@@ -1104,6 +1192,7 @@ io.on('connection', (socket) => {
     const maxPlayers = room.is4PlayerSetting ? 4 : 2;
     const nextStarter = (previousStarter + 1) % maxPlayers;
 
+    resetAIMemory(room);
     const newGame = initGame(room.is4PlayerSetting);
     newGame.starterIndex = nextStarter;
     newGame.turn = nextStarter;
@@ -1134,6 +1223,7 @@ io.on('connection', (socket) => {
     const currentTargetScore = room.gameState ? room.gameState.targetScore : room.targetScoreSetting;
     const maxPlayers = room.is4PlayerSetting ? 4 : 2;
     
+    resetAIMemory(room);
     room.gameState = initGame(room.is4PlayerSetting);
     const sorteoActionText = performSorteoInRoom(room, room.is4PlayerSetting);
     room.gameState.starterIndex = 0;
@@ -1362,6 +1452,7 @@ io.on('connection', (socket) => {
       const maxPlayers = room.is4PlayerSetting ? 4 : 2;
       const nextStarter = (previousStarter + 1) % maxPlayers;
 
+      resetAIMemory(room);
       const newGame = initGame(room.is4PlayerSetting);
       newGame.starterIndex = nextStarter;
       newGame.turn = nextStarter;
@@ -1388,26 +1479,45 @@ io.on('connection', (socket) => {
   });
 });
 
-// HELPER: Rastrear cartas visibles e invisibles en la partida
-function getCardTracker(state, botIdx) {
-  // Inicializar mapa de conteo visible
-  const visible = {};
+// HELPER: Rango de valores numéricos para evaluación de escaleras y conectores
+const RANK_ORDER_VALS = { 'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
+
+// ============================================================================
+// MOTOR PROBABILÍSTICO Y RASTREADOR AVANZADO DE CARTAS (SIN TRAMPAS)
+// ============================================================================
+function getCardTracker(state, botIdx, aiMemory) {
   const suits = ['H', 'D', 'C', 'S', 'Joker'];
   const ranks = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'Joker'];
-  
+
+  const totalDeckCopies = {};
   suits.forEach(s => {
-    ranks.forEach(r => {
-      visible[`${s}-${r}`] = 0;
-    });
+    if (s === 'Joker') {
+      totalDeckCopies['Joker-Joker'] = 4;
+    } else {
+      ranks.forEach(r => {
+        if (r !== 'Joker') {
+          totalDeckCopies[`${s}-${r}`] = 2;
+        }
+      });
+    }
   });
 
+  const seenCount = {};
+  for (const k in totalDeckCopies) {
+    seenCount[k] = 0;
+  }
+  const seenCardIds = new Set();
+
   const countCard = (c) => {
-    if (c && c.rank !== 'hidden') {
-      const key = `${c.suit}-${c.rank}`;
-      if (visible[key] !== undefined) {
-        visible[key]++;
-      }
+    if (!c || c.rank === 'hidden') return;
+    const key = (c.suit === 'Joker' || c.rank === 'Joker') ? 'Joker-Joker' : `${c.suit}-${c.rank}`;
+    if (seenCount[key] === undefined) return;
+
+    if (c.id) {
+      if (seenCardIds.has(c.id)) return;
+      seenCardIds.add(c.id);
     }
+    seenCount[key] = Math.min(totalDeckCopies[key], seenCount[key] + 1);
   };
 
   // 1. Mano propia del bot
@@ -1419,39 +1529,262 @@ function getCardTracker(state, botIdx) {
   state.players.forEach(p => {
     if (p.melds) {
       p.melds.forEach(meld => {
-        if (meld) {
-          meld.forEach(countCard);
-        }
+        if (meld) meld.forEach(countCard);
       });
     }
   });
 
-  // 3. Pozo de descartes
+  // 3. Pozo de descartes actual
   if (state.discardPile) {
     state.discardPile.forEach(countCard);
   }
 
-  // Mapear conteo total de cartas invisibles y sus probabilidades
-  const totalVisible = Object.values(visible).reduce((a, b) => a + b, 0);
-  const totalInvisible = 108 - totalVisible;
+  // 4. Cartas del historial de descartes
+  if (aiMemory && Array.isArray(aiMemory.discardHistory)) {
+    aiMemory.discardHistory.forEach(countCard);
+  }
+
+  // 5. Cartas conocidas en mano del oponente
+  if (aiMemory && aiMemory.knownOpponentHands) {
+    Object.values(aiMemory.knownOpponentHands).forEach(cards => {
+      if (Array.isArray(cards)) cards.forEach(countCard);
+    });
+  }
+
+  // 6. Cartas que el bot tuvo previamente
+  if (aiMemory && Array.isArray(aiMemory.botHeldHistory)) {
+    aiMemory.botHeldHistory.forEach(countCard);
+  }
+
+  let totalVisible = 0;
+  for (const k in seenCount) {
+    totalVisible += seenCount[k];
+  }
+  const totalInvisible = Math.max(0, 108 - totalVisible);
+
+  const getRemainingCount = (suit, rank) => {
+    const key = (suit === 'Joker' || rank === 'Joker') ? 'Joker-Joker' : `${suit}-${rank}`;
+    const max = totalDeckCopies[key] || 0;
+    const seen = seenCount[key] || 0;
+    return Math.max(0, max - seen);
+  };
+
+  const drawPileCount = state.drawPile ? state.drawPile.length : 0;
+  let mortosRemainingCards = 0;
+  if (state.mortos) {
+    mortosRemainingCards = state.mortos.filter(Boolean).length * 11;
+  }
+
+  // Probabilidad de que la PRÓXIMA carta del mazo sea (suit, rank)
+  const probNextDraw = (suit, rank) => {
+    if (totalInvisible <= 0) return 0;
+    const rem = getRemainingCount(suit, rank);
+    return rem / totalInvisible;
+  };
+
+  // Probabilidad hipergeométrica exacta de que al menos 1 copia esté en el mazo de robo
+  const probInDrawPile = (suit, rank) => {
+    const rem = getRemainingCount(suit, rank);
+    if (rem <= 0 || drawPileCount <= 0 || totalInvisible <= 0) return 0;
+    if (drawPileCount >= totalInvisible) return 1;
+
+    let pZero = 1;
+    for (let i = 0; i < rem; i++) {
+      const num = totalInvisible - drawPileCount - i;
+      const den = totalInvisible - i;
+      if (num <= 0) {
+        pZero = 0;
+        break;
+      }
+      pZero *= (num / den);
+    }
+    return Math.max(0, Math.min(1, 1 - pZero));
+  };
+
+  // Probabilidad hipergeométrica exacta de que al menos 1 copia esté en los muertos no tomados
+  const probInMorto = (suit, rank) => {
+    const rem = getRemainingCount(suit, rank);
+    if (rem <= 0 || mortosRemainingCards <= 0 || totalInvisible <= 0) return 0;
+    if (mortosRemainingCards >= totalInvisible) return 1;
+
+    let pZero = 1;
+    for (let i = 0; i < rem; i++) {
+      const num = totalInvisible - mortosRemainingCards - i;
+      const den = totalInvisible - i;
+      if (num <= 0) {
+        pZero = 0;
+        break;
+      }
+      pZero *= (num / den);
+    }
+    return Math.max(0, Math.min(1, 1 - pZero));
+  };
 
   return {
-    visible,
+    visible: seenCount,
     totalVisible,
     totalInvisible,
-    getRemainingCount: (suit, rank) => {
-      const maxCount = (suit === 'Joker') ? 4 : 2;
-      const seen = visible[`${suit}-${rank}`] || 0;
-      return Math.max(0, maxCount - seen);
-    }
+    drawPileCount,
+    mortosRemainingCards,
+    getRemainingCount,
+    probNextDraw,
+    probInDrawPile,
+    probInMorto
   };
 }
 
 // HELPER: Calcular la probabilidad de robar una carta específica del mazo
 function getProbabilityOfCard(suit, rank, tracker) {
+  if (!tracker) return 0;
+  if (tracker.probNextDraw) return tracker.probNextDraw(suit, rank);
   if (tracker.totalInvisible <= 0) return 0;
   const remaining = tracker.getRemainingCount(suit, rank);
   return remaining / tracker.totalInvisible;
+}
+
+// ============================================================================
+// EVALUADOR TÁCTICO DE PELIGRO DE DESCARTE CONTRA LA MANO CONOCIDA DEL RIVAL
+// ============================================================================
+function evaluateDiscardDangerAgainstOpponent(card, knownOpponentCards, opponentMelds, tracker, opponentHandSize) {
+  let dangerScore = 0;
+  let dangerReason = '';
+
+  const isWildcard = card.rank === '2' || card.rank === 'Joker';
+  if (isWildcard) {
+    return { dangerScore: 100000, reason: 'Comodín (No descartar bajo ningún concepto)' };
+  }
+
+  const cardRankVal = RANK_ORDER_VALS[card.rank] || 0;
+
+  // 1. PELIGRO CONTRA CARTAS CONOCIDAS EN MANO DEL OPONENTE (Información pública 100% real)
+  if (knownOpponentCards && knownOpponentCards.length > 0) {
+    // A) Peligro de grupo / trío (Mismo rango)
+    const sameRankCount = knownOpponentCards.filter(c => c.rank === card.rank).length;
+    if (sameRankCount >= 2) {
+      // El rival ya tiene 2 cartas de este rango (ej. dos K): tirarle otra le da el trío instantáneo
+      dangerScore += 65000;
+      dangerReason = `Rival tiene ${sameRankCount} cartas de rango ${card.rank} en mano`;
+    } else if (sameRankCount === 1) {
+      // El rival tiene 1 carta de ese rango: le arma pareja
+      dangerScore += 16000;
+      if (!dangerReason) dangerReason = `Rival tiene un ${card.rank} en mano`;
+    }
+
+    // B) Peligro de corrida / escalera (Mismo palo)
+    const sameSuitKnown = knownOpponentCards.filter(c => c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker');
+    if (sameSuitKnown.length > 0) {
+      const suitVals = [];
+      sameSuitKnown.forEach(c => {
+        const v = RANK_ORDER_VALS[c.rank];
+        if (v) {
+          suitVals.push(v);
+          if (v === 1) suitVals.push(14); // As como carta alta
+        }
+      });
+
+      const uniqueVals = Array.from(new Set(suitVals)).sort((a, b) => a - b);
+      let formsInstantRun = false;
+      let fillsInsideGap = false;
+      let twoStepConnector = false;
+      let singleNeighbor = false;
+
+      for (let i = 0; i < uniqueVals.length; i++) {
+        for (let j = i + 1; j < uniqueVals.length; j++) {
+          const v1 = uniqueVals[i];
+          const v2 = uniqueVals[j];
+
+          // Caso: rival tiene v1 y v1+1 consecutivos (ej. 5 y 6 de trébol)
+          if (v2 === v1 + 1) {
+            // Si descartamos v1-1 (4) o v1+2 (7), le completa la corrida de 3 cartas
+            if (cardRankVal === v1 - 1 || cardRankVal === v1 + 2 || (cardRankVal === 1 && v1 === 13) || (cardRankVal === 14 && v1 === 12)) {
+              formsInstantRun = true;
+            }
+            // Conector a distancia 2: ej. 3 u 8
+            if (cardRankVal === v1 - 2 || cardRankVal === v1 + 3) {
+              twoStepConnector = true;
+            }
+          }
+
+          // Caso: rival tiene v1 y v1+2 con hueco en medio (ej. 5 y 7 de trébol)
+          if (v2 === v1 + 2) {
+            if (cardRankVal === v1 + 1) {
+              fillsInsideGap = true;
+            }
+          }
+        }
+
+        // Caso: vecino simple a distancia 1 de alguna carta conocida (ej. rival tiene 5 y descartamos 4 o 6)
+        if (Math.abs(uniqueVals[i] - cardRankVal) === 1 || (uniqueVals[i] === 13 && cardRankVal === 1) || (uniqueVals[i] === 1 && cardRankVal === 13)) {
+          singleNeighbor = true;
+        }
+      }
+
+      if (formsInstantRun) {
+        dangerScore += 70000;
+        dangerReason = `Completa corrida en mano del rival de palo ${card.suit}`;
+      } else if (fillsInsideGap) {
+        dangerScore += 65000;
+        dangerReason = `Llena hueco de corrida en mano del rival de palo ${card.suit}`;
+      } else if (twoStepConnector) {
+        dangerScore += 14000;
+        if (!dangerReason) dangerReason = `Conector a 2 pasos de corrida en mano rival (${card.suit})`;
+      } else if (singleNeighbor) {
+        dangerScore += 7000;
+        if (!dangerReason) dangerReason = `Vecino directo de carta en mano rival (${card.suit})`;
+      }
+    }
+  }
+
+  // 2. PELIGRO CONTRA JUEGOS BAJADOS EN LA MESA POR EL RIVAL
+  if (opponentMelds && opponentMelds.length > 0) {
+    let servesMeld = false;
+    let createsCanastra = false;
+    let adjacentToRun = false;
+
+    for (const meld of opponentMelds) {
+      if (validateMeld([...meld, card]).valid) {
+        servesMeld = true;
+        if (meld.length >= 6) {
+          createsCanastra = true;
+        }
+        break;
+      }
+    }
+
+    if (servesMeld) {
+      if (createsCanastra) {
+        dangerScore += 50000;
+        dangerReason = `¡Regala canasta en mesa al rival!`;
+      } else {
+        dangerScore += 25000;
+        dangerReason = `Acopla directamente a juego del rival en mesa`;
+      }
+    } else {
+      for (const meld of opponentMelds) {
+        if (meld.length > 0 && meld[0].suit === card.suit) {
+          const rankVals = meld.map(c => RANK_ORDER_VALS[c.representedRank || c.rank]).filter(Boolean);
+          if (rankVals.length > 0) {
+            const minV = Math.min(...rankVals);
+            const maxV = Math.max(...rankVals);
+            if (cardRankVal === minV - 1 || cardRankVal === maxV + 1 || (minV === 1 && cardRankVal === 13) || (maxV === 13 && cardRankVal === 1)) {
+              adjacentToRun = true;
+              break;
+            }
+          }
+        }
+      }
+      if (adjacentToRun) {
+        dangerScore += 6000;
+        if (!dangerReason) dangerReason = `Adyacente a corrida del rival en mesa`;
+      }
+    }
+  }
+
+  if (opponentHandSize <= 3 && dangerScore > 0) {
+    dangerScore *= 1.5;
+  }
+
+  return { dangerScore, reason: dangerReason };
 }
 
 
@@ -2310,12 +2643,15 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
   let discardIdx = hasNonWildcards ? botHand.findIndex(c => c.rank !== '2' && c.rank !== 'Joker') : 0;
   let minScore = Infinity;
 
+  const mem = getAIMemory(room);
+  const tracker = getCardTracker(gameState, botIdx, mem);
+
   const nextPlayerIdx = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
   const nextPlayerTeamIdx = getTeamOwnerIndex(nextPlayerIdx, gameState.is4Player);
   const nextPlayerBlocked = gameState.is4Player && gameState.mortosTaken[nextPlayerTeamIdx] === nextPlayerIdx;
 
+  const nextOpponentKnownCards = (mem.knownOpponentHands && mem.knownOpponentHands[nextPlayerIdx]) ? mem.knownOpponentHands[nextPlayerIdx] : [];
   const opponentPlayer = gameState.players[opponentTeamIdx];
-  const rankOrderVals = { 'A': 1, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
 
   const opponentHandSize = opponentPlayer?.hand?.length || 0;
   const opponentMelds = opponentPlayer?.melds || [];
@@ -2341,100 +2677,69 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       continue;
     }
 
+    // EVALUACIÓN DE PELIGRO CONTRA LA MANO CONOCIDA Y MESA DEL RIVAL
+    const danger = evaluateDiscardDangerAgainstOpponent(
+      card,
+      nextOpponentKnownCards,
+      opponentMelds,
+      tracker,
+      opponentHandSize
+    );
+
     let score = 0;
 
-    // Filtro de peligro contra oponentes: ¿Le sirve al rival para acoplar o agrandar sus juegos?
-    let servesOpponent = false;
-    if (opponentPlayer && opponentPlayer.melds) {
-      for (const meld of opponentPlayer.melds) {
-        if (validateMeld([...meld, card]).valid) {
-          servesOpponent = true;
-          break;
-        }
-      }
-    }
+    if (isDefensiveSurvivalMode || opponentImminentWin) {
+      // EN MODO SUPERVIVENCIA DEFENSIVA / INMINENTE CIERRE RIVAL:
+      // Entre las cartas seguras, descartar la de mayor puntaje para minimizar penalización en mano
+      score = -CARD_VALUES[card.rank] + danger.dangerScore;
+    } else {
+      // EN JUEGO NORMAL:
+      let botRetention = 0;
 
-    let adjacentToOpponentMeld = false;
-    if (opponentPlayer && opponentPlayer.melds) {
-      for (const meld of opponentPlayer.melds) {
-        if (meld.length > 0 && meld[0].suit === card.suit) {
-          const rankVals = meld.map(c => rankOrderVals[c.rank]).filter(Boolean);
+      // Duplicados en mano propia (muy conveniente descartar si está repetida en mano)
+      const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
+      if (duplicates > 0) {
+        botRetention -= 120;
+      }
+
+      // Conexiones en mano propia
+      const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
+      botRetention += sameSuitCount * 8;
+      botRetention += (CARD_VALUES[card.rank] || 5);
+      
+      const connects = getConnectionsCount(card, botHand);
+      botRetention += connects * 100;
+
+      // Conexión directa con juegos propios en la mesa:
+      let connectsToMyMelds = 0;
+      botMelds.forEach(m => {
+        if (m.length > 0 && m[0].suit === card.suit) {
+          const rankVals = m.map(mc => RANK_ORDER_VALS[mc.representedRank || mc.rank]).filter(Boolean);
           if (rankVals.length > 0) {
             const minVal = Math.min(...rankVals);
             const maxVal = Math.max(...rankVals);
-            const cardVal = rankOrderVals[card.rank];
-            if (cardVal === minVal - 1 || cardVal === maxVal + 1) {
-              adjacentToOpponentMeld = true;
-              break;
+            const cardVal = RANK_ORDER_VALS[card.rank] || 0;
+            if (Math.abs(cardVal - minVal) <= 2 || Math.abs(cardVal - maxVal) <= 2) {
+              connectsToMyMelds++;
             }
           }
         }
-      }
-    }
+      });
+      botRetention += connectsToMyMelds * 150;
 
-    let dangerPenalty = 0;
-    if (isDefensiveSurvivalMode || opponentImminentWin) {
-      // EN MODO SUPERVIVENCIA DEFENSIVA:
-      // NUNCA tirarle cartas al rival que le permitan cerrar o acoplar.
-      // Retenerlas para lograr la supervivencia.
-      if (servesOpponent) dangerPenalty += 5000;
-      else if (adjacentToOpponentMeld) dangerPenalty += 2000;
-      if (opponentHandSize <= 3 && servesOpponent) dangerPenalty += 10000;
-
-      // No descartar comodines si el rival está cerca de cerrar
-      if (card.rank === 'Joker' || card.rank === '2') dangerPenalty += 3000;
-
-      // Entre las cartas SEGURAS (donde dangerPenalty === 0), descartar la de mayor puntaje para minimizar penalización en mano
-      score = -CARD_VALUES[card.rank] + dangerPenalty;
-    } else {
-      // EN JUEGO NORMAL:
-      // Valor de comodines (muy alto para retenerlos)
-      if (card.rank === 'Joker') score += 1000;
-      else if (card.rank === '2') score += 500;
-      else {
-        // Valor por conexiones y palo
-        const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
-        score += sameSuitCount * 10;
-        score += (CARD_VALUES[card.rank] || 5);
-        
-        const connects = getConnectionsCount(card, botHand);
-        score += connects * 100;
-
-        // Conexión directa con juegos propios en la mesa:
-        let connectsToMyMelds = 0;
-        botMelds.forEach(m => {
-          if (m.length > 0 && m[0].suit === card.suit) {
-            const rankVals = m.map(mc => rankOrderVals[mc.representedRank || mc.rank]).filter(Boolean);
-            if (rankVals.length > 0) {
-              const minVal = Math.min(...rankVals);
-              const maxVal = Math.max(...rankVals);
-              const cardVal = rankOrderVals[card.rank] || 0;
-              if (Math.abs(cardVal - minVal) <= 2 || Math.abs(cardVal - maxVal) <= 2) {
-                connectsToMyMelds++;
-              }
-            }
-          }
-        });
-        score += connectsToMyMelds * 150; // ¡Gran retención para no tirar cartas que agrandan nuestros juegos en mesa!
+      // CÁLCULO PROBABILÍSTICO DE RECUPERACIÓN DESDE EL MAZO:
+      const probRecovery = tracker.probInDrawPile(card.suit, card.rank);
+      if (probRecovery >= 0.45) {
+        // Alta probabilidad de que otra copia esté en el mazo: se puede arriesgar más si es necesario
+        botRetention -= 50;
+      } else if (tracker.getRemainingCount(card.suit, card.rank) === 0) {
+        // Irrecuperable: no queda ninguna otra copia en todo el mazo ni muertos
+        botRetention += 90;
       }
 
-      // Penalización por duplicados (hace que sea preferible descartarla)
-      const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
-      if (duplicates > 0) {
-        score -= 80;
-      }
-
-      if (servesOpponent) dangerPenalty += 500;
-      else if (adjacentToOpponentMeld) dangerPenalty += 250;
-
-      // Defensa: Bloqueo de salida si al rival le quedan pocas cartas
-      if (opponentHandSize <= 3 && servesOpponent) {
-        dangerPenalty += 500;
-      }
-
-      // APLICACIÓN DE LA REGLA DE BLOQUEO DEL MUERTO EN 4 JUGADORES:
+      // REGLA DE BLOQUEO DEL MUERTO EN 4 JUGADORES:
       if (nextPlayerBlocked) {
-        dangerPenalty = 0;
+        score = botRetention;
         const partnerIdx = (botIdx + 2) % 4;
         const partnerMelds = gameState.players[teamIdx]?.melds || [];
         let servesPartner = false;
@@ -2447,9 +2752,9 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
         if (servesPartner) {
           score -= 600;
         }
+      } else {
+        score = botRetention + danger.dangerScore;
       }
-
-      score += dangerPenalty;
     }
 
     if (score < minScore) {
@@ -2496,6 +2801,7 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
 
     if (hasTakenMorto && canastrasCount >= requiredCanastras) {
       botHand.splice(discardIdx, 1);
+      recordDiscardCard(room, botIdx, cardToDiscard);
       gameState.discardPile.push(cardToDiscard);
       gameState.status = 'finished-visual';
       gameState.winner = botIdx;
@@ -2511,6 +2817,7 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
     } else {
       if (!hasTakenMorto) {
         botHand.splice(discardIdx, 1);
+        recordDiscardCard(room, botIdx, cardToDiscard);
         gameState.discardPile.push(cardToDiscard);
         gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
         checkMortoIndirect(botIdx);
@@ -2520,6 +2827,7 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
     }
   } else {
     botHand.splice(discardIdx, 1);
+    recordDiscardCard(room, botIdx, cardToDiscard);
     gameState.discardPile.push(cardToDiscard);
     gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
     checkMortoIndirect(botIdx);
