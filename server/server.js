@@ -2100,7 +2100,21 @@ function findDirtyRunsCandidates(hand) {
 
   const suits = ['H', 'D', 'C', 'S'];
   for (let s of suits) {
-    const slots = getSuitCardSlots(hand, s);
+    // FILTRO ESTRICTO: Para formar una corrida de 3 cartas con comodín,
+    // las otras 2 cartas DEBEN ser naturales (no 2 ni Joker) del mismo palo.
+    // Prohíbe combinaciones inválidas como [2♦, 4♦, 2♣] (dos doses).
+    const naturalSuitCards = hand.filter(c => c && c.suit === s && c.rank !== '2' && c.rank !== 'Joker');
+    const slots = [];
+    naturalSuitCards.forEach(c => {
+      if (c.rank === 'A') {
+        slots.push({ card: c, slot: 1 });
+        slots.push({ card: c, slot: 14 });
+      } else {
+        const v = BOT_RANK_ORDER[c.rank];
+        if (v) slots.push({ card: c, slot: v });
+      }
+    });
+
     for (let i = 0; i < slots.length; i++) {
       for (let j = i + 1; j < slots.length; j++) {
         const s1 = slots[i];
@@ -2148,10 +2162,32 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
     }
   }
 
+  // 1.1 Si el comodín es un Joker, ¿puede unirse a dos doses para formar un grupo de doses? [2, 2, Joker]
+  if (wildcard.rank === 'Joker') {
+    const twosInHand = hand.filter(c => c.id !== wildcard.id && c.rank === '2');
+    if (twosInHand.length >= 2) {
+      const candidate = [twosInHand[0], twosInHand[1], wildcard];
+      if (validateMeld(candidate).valid) {
+        return true;
+      }
+    }
+  }
+
   // 2. ¿Puede formar una nueva escalera (secuencia del mismo palo)?
   const suits = ['H', 'D', 'C', 'S'];
   for (let s of suits) {
-    const slots = getSuitCardSlots(hand.filter(c => c.id !== wildcard.id), s);
+    const naturalSuitCards = hand.filter(c => c && c.id !== wildcard.id && c.suit === s && c.rank !== '2' && c.rank !== 'Joker');
+    const slots = [];
+    naturalSuitCards.forEach(c => {
+      if (c.rank === 'A') {
+        slots.push({ card: c, slot: 1 });
+        slots.push({ card: c, slot: 14 });
+      } else {
+        const v = BOT_RANK_ORDER[c.rank];
+        if (v) slots.push({ card: c, slot: v });
+      }
+    });
+
     for (let i = 0; i < slots.length; i++) {
       for (let j = i + 1; j < slots.length; j++) {
         const s1 = slots[i];
@@ -2338,6 +2374,33 @@ function simulateBotMelding(hand, existingMelds) {
           if (idx !== -1) tempHand.splice(idx, 1);
         });
       }
+    }
+  }
+
+  // 4.1 Simular nuevos grupos de doses ("tres dos" o "dos doses y un Joker")
+  const twosInTemp = tempHand.filter(c => c.rank === '2');
+  if (twosInTemp.length >= 3) {
+    const candidateTwos = twosInTemp.slice(0, 3);
+    const result = validateMeld(candidateTwos);
+    if (result.valid) {
+      tempMelds.push(result.cards);
+      cardsPlayed += 3;
+      candidateTwos.forEach(rc => {
+        const idx = tempHand.findIndex(c => c.id === rc.id);
+        if (idx !== -1) tempHand.splice(idx, 1);
+      });
+    }
+  } else if (twosInTemp.length === 2 && tempHand.some(c => c.rank === 'Joker')) {
+    const jokerCard = tempHand.find(c => c.rank === 'Joker');
+    const candidateTwos = [twosInTemp[0], twosInTemp[1], jokerCard];
+    const result = validateMeld(candidateTwos);
+    if (result.valid) {
+      tempMelds.push(result.cards);
+      cardsPlayed += 3;
+      candidateTwos.forEach(rc => {
+        const idx = tempHand.findIndex(c => c.id === rc.id);
+        if (idx !== -1) tempHand.splice(idx, 1);
+      });
     }
   }
 
@@ -2604,6 +2667,17 @@ function performOneBotMeldActionInRoom(room, botIdx) {
       const candidate = [...groupCards, freshWildcards[0]];
       if (tryMeldBotRun(candidate, botIdx, true)) return true;
     }
+  }
+
+  // Grupos de tres doses ("tres dos") o dos doses y un Joker ("dos cartas número dos y un joker")
+  const twosInBotHand = botHand.filter(c => c.rank === '2');
+  if (twosInBotHand.length >= 3) {
+    const candidateTwos = twosInBotHand.slice(0, 3);
+    if (tryMeldBotRun(candidateTwos, botIdx, true)) return true;
+  } else if (twosInBotHand.length === 2 && botHand.some(c => c.rank === 'Joker')) {
+    const jokerCard = botHand.find(c => c.rank === 'Joker');
+    const candidateTwos = [twosInBotHand[0], twosInBotHand[1], jokerCard];
+    if (tryMeldBotRun(candidateTwos, botIdx, true)) return true;
   }
 
   return false;

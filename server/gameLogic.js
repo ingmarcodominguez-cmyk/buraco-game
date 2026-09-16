@@ -78,20 +78,31 @@ function validateSequence(cards) {
     return { valid: false, error: 'Todas las cartas naturales deben ser del mismo palo.' };
   }
 
-  // En Buraco una secuencia puede tener como máximo 1 comodín (usado como comodín).
-  // Además, si la secuencia incluye la posición del 2, puede tener el 2 de su propio palo
-  // en su lugar natural. Por lo tanto, puede haber como máximo 2 cartas especiales (Joker o 2),
-  // y si hay 2, al menos una de ellas debe ser el 2 del mismo palo de la secuencia.
+  // REGLAS ESTRICTAS DE COMODINES Y DOSES EN UNA SECUENCIA (CORRELACIÓN):
+  // 1. Una secuencia no puede tener más de un Joker
   const jokers = cards.filter(c => c.rank === 'Joker');
   if (jokers.length > 1) {
     return { valid: false, error: 'Una secuencia no puede tener más de un Joker.' };
   }
+
+  // 2. En una secuencia NO puede haber más de un 2 (prohibido tener dos doses en la misma escalera)
+  const twos = cards.filter(c => c.rank === '2');
+  if (twos.length > 1) {
+    return { valid: false, error: 'Una secuencia no puede tener más de un 2.' };
+  }
+
+  // 3. En una secuencia de 3 cartas debe haber al menos 2 cartas naturales (no comodines)
+  if (cards.length === 3 && naturalCards.length < 2) {
+    return { valid: false, error: 'Una secuencia de 3 cartas debe contener al menos 2 cartas naturales.' };
+  }
+
+  // 4. Cartas especiales (Joker o 2): como máximo 2 si una es el 2 natural del palo y la otra es Joker en una corrida de 4 o más cartas
   const specialCards = cards.filter(c => c.rank === 'Joker' || c.rank === '2');
   if (specialCards.length > 2) {
     return { valid: false, error: 'Una secuencia no puede tener más de un comodín y el 2 natural.' };
   }
-  if (specialCards.length === 2 && !cards.some(c => c.rank === '2' && c.suit === suit)) {
-    return { valid: false, error: 'Una secuencia solo puede tener dos cartas especiales si una de ellas es el 2 de su mismo palo actuando como 2 natural.' };
+  if (specialCards.length === 2 && (!cards.some(c => c.rank === '2' && c.suit === suit) || cards.length < 4)) {
+    return { valid: false, error: 'Una secuencia solo puede tener dos cartas especiales si una de ellas es el 2 de su mismo palo actuando como 2 natural en una corrida de 4 o más cartas.' };
   }
 
   const N = cards.length;
@@ -418,6 +429,7 @@ module.exports = {
   createDeck,
   shuffle,
   validateSequence,
+  validateSet,
   validateMeld,
   initGame,
   calculateRoundScores,
