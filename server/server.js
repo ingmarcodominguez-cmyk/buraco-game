@@ -1963,8 +1963,24 @@ function runBotTurnInRoom(room, botIdx) {
       gameState.lastAction = `${botPlayer.name} robó del mazo.`;
       
       if (gameState.isFirstTurn) {
-        gameState.isFirstTurn = false;
-        gameState.firstDrawnCardId = null;
+        const handWithoutCard = botHand.slice(0, botHand.length - 1);
+        const isUseful = isCardUsefulForFirstTurn(card, handWithoutCard);
+        if (!isUseful && gameState.drawPile.length > 0) {
+          const rejected = botHand.pop();
+          recordDiscardCard(room, botIdx, rejected);
+          gameState.discardPile.push(rejected);
+          
+          const newCard = gameState.drawPile.pop();
+          botHand.push(newCard);
+          
+          gameState.isFirstTurn = false;
+          gameState.firstDrawnCardId = null;
+          gameState.lastAction = `${botPlayer.name} descartó la primera carta (${rejected.rank} de ${rejected.suit}) al pozo porque no le servía y robó otra del mazo.`;
+        } else {
+          gameState.isFirstTurn = false;
+          gameState.firstDrawnCardId = null;
+          gameState.lastAction = `${botPlayer.name} robó y conservó la primera carta del mazo.`;
+        }
       }
     } else {
       // Fin de ronda por mazo vacío
@@ -2100,20 +2116,7 @@ function findDirtyRunsCandidates(hand) {
 
   const suits = ['H', 'D', 'C', 'S'];
   for (let s of suits) {
-    // FILTRO ESTRICTO: Para formar una corrida de 3 cartas con comodín,
-    // las otras 2 cartas DEBEN ser naturales (no 2 ni Joker) del mismo palo.
-    // Prohíbe combinaciones inválidas como [2♦, 4♦, 2♣] (dos doses).
-    const naturalSuitCards = hand.filter(c => c && c.suit === s && c.rank !== '2' && c.rank !== 'Joker');
-    const slots = [];
-    naturalSuitCards.forEach(c => {
-      if (c.rank === 'A') {
-        slots.push({ card: c, slot: 1 });
-        slots.push({ card: c, slot: 14 });
-      } else {
-        const v = BOT_RANK_ORDER[c.rank];
-        if (v) slots.push({ card: c, slot: v });
-      }
-    });
+    const slots = getSuitCardSlots(hand, s);
 
     for (let i = 0; i < slots.length; i++) {
       for (let j = i + 1; j < slots.length; j++) {
@@ -2124,6 +2127,9 @@ function findDirtyRunsCandidates(hand) {
         if (diff === 1 || diff === 2) {
           for (const wc of wildcards) {
             if (wc.id === s1.card.id || wc.id === s2.card.id) continue;
+            // Prohibido tener dos doses en la misma corrida
+            if (wc.rank === '2' && (s1.card.rank === '2' || s2.card.rank === '2')) continue;
+            if (s1.card.rank === '2' && s2.card.rank === '2') continue;
             const cand = [s1.card, s2.card, wc];
             const v = validateMeld(cand);
             if (v.valid) {
@@ -2176,18 +2182,7 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
   // 2. ¿Puede formar una nueva escalera (secuencia del mismo palo)?
   const suits = ['H', 'D', 'C', 'S'];
   for (let s of suits) {
-    const naturalSuitCards = hand.filter(c => c && c.id !== wildcard.id && c.suit === s && c.rank !== '2' && c.rank !== 'Joker');
-    const slots = [];
-    naturalSuitCards.forEach(c => {
-      if (c.rank === 'A') {
-        slots.push({ card: c, slot: 1 });
-        slots.push({ card: c, slot: 14 });
-      } else {
-        const v = BOT_RANK_ORDER[c.rank];
-        if (v) slots.push({ card: c, slot: v });
-      }
-    });
-
+    const slots = getSuitCardSlots(hand.filter(c => c.id !== wildcard.id), s);
     for (let i = 0; i < slots.length; i++) {
       for (let j = i + 1; j < slots.length; j++) {
         const s1 = slots[i];
@@ -2195,8 +2190,56 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
         if (s1.card.id === s2.card.id) continue;
         const diff = Math.abs(s1.slot - s2.slot);
         if (diff === 1 || diff === 2) {
+          // Prohibido dos doses
+          if (wildcard.rank === '2' && (s1.card.rank === '2' || s2.card.rank === '2')) continue;
+          if (s1.card.rank === '2' && s2.card.rank === '2') continue;
           const candidate = [s1.card, s2.card, wildcard];
           if (validateMeld(candidate).valid) {
+            return true;
+          }
+        }
+      }
+    }
+  }
+
+  return false;
+}
+
+// HELPER: Evalúa si la primera carta robada del mazo le sirve a la IA cuando sale de "mano"
+function isCardUsefulForFirstTurn(card, handWithoutCard) {
+  if (!card) return false;
+
+  // 1. Un comodín (2 o Joker) SIEMPRE sirve
+  if (card.rank === '2' || card.rank === 'Joker') return true;
+
+  // 2. ¿Forma o completa algún juego (secuencia o grupo) junto con cartas de la mano?
+  for (let i = 0; i < handWithoutCard.length; i++) {
+    for (let j = i + 1; j < handWithoutCard.length; j++) {
+      if (validateMeld([handWithoutCard[i], handWithoutCard[j], card]).valid) {
+        return true;
+      }
+    }
+  }
+
+  // 3. ¿Tiene pareja en mano del mismo número? (Camino a trío: ya tiene 1 o más cartas iguales)
+  const sameRankCount = handWithoutCard.filter(c => c.rank === card.rank && c.rank !== '2' && c.rank !== 'Joker').length;
+  if (sameRankCount >= 1) {
+    return true;
+  }
+
+  // 4. ¿Tiene vecinos directos (distancia 1) o conectores con hueco (distancia 2) del mismo palo? (Camino a corrida)
+  const cardVal = BOT_RANK_ORDER[card.rank];
+  if (cardVal) {
+    const cardSlots = card.rank === 'A' ? [1, 14] : [cardVal];
+    const sameSuitCards = handWithoutCard.filter(c => c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker');
+    for (const sc of sameSuitCards) {
+      const scVal = BOT_RANK_ORDER[sc.rank];
+      if (!scVal) continue;
+      const scSlots = sc.rank === 'A' ? [1, 14] : [scVal];
+      for (const cSlot of cardSlots) {
+        for (const sSlot of scSlots) {
+          const diff = Math.abs(cSlot - sSlot);
+          if (diff === 1 || diff === 2) {
             return true;
           }
         }

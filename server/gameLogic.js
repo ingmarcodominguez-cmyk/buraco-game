@@ -91,18 +91,13 @@ function validateSequence(cards) {
     return { valid: false, error: 'Una secuencia no puede tener más de un 2.' };
   }
 
-  // 3. En una secuencia de 3 cartas debe haber al menos 2 cartas naturales (no comodines)
-  if (cards.length === 3 && naturalCards.length < 2) {
-    return { valid: false, error: 'Una secuencia de 3 cartas debe contener al menos 2 cartas naturales.' };
-  }
-
-  // 4. Cartas especiales (Joker o 2): como máximo 2 si una es el 2 natural del palo y la otra es Joker en una corrida de 4 o más cartas
+  // 3. Cartas especiales (Joker o 2): como máximo 2 si una de ellas es el 2 natural del mismo palo
   const specialCards = cards.filter(c => c.rank === 'Joker' || c.rank === '2');
   if (specialCards.length > 2) {
     return { valid: false, error: 'Una secuencia no puede tener más de un comodín y el 2 natural.' };
   }
-  if (specialCards.length === 2 && (!cards.some(c => c.rank === '2' && c.suit === suit) || cards.length < 4)) {
-    return { valid: false, error: 'Una secuencia solo puede tener dos cartas especiales si una de ellas es el 2 de su mismo palo actuando como 2 natural en una corrida de 4 o más cartas.' };
+  if (specialCards.length === 2 && !cards.some(c => c.rank === '2' && c.suit === suit)) {
+    return { valid: false, error: 'Una secuencia solo puede tener dos cartas especiales si una de ellas es el 2 de su mismo palo actuando como 2 natural.' };
   }
 
   const N = cards.length;
