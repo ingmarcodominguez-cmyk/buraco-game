@@ -943,11 +943,11 @@ io.on('connection', (socket) => {
     const totalCanastrasAfter = existingCanastras + newCanastraCreated;
     const requiredCanastras = gameState.requiredCanastras || 1;
     const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
-    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
+    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 1);
 
     if (hand.length - cards.length < minCardsHand) {
-      if (minCardsHand === 2) {
-        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
+      if (minCardsHand === 1) {
+        socket.emit('error-message', `No puedes quedarte sin cartas en la mano sin tener al menos ${requiredCanastras} canasta(s) para batir. Debes conservar al menos una para tu descarte.`);
       } else {
         socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
       }
@@ -1026,11 +1026,11 @@ io.on('connection', (socket) => {
     const totalCanastrasAfter = existingCanastras + netCanastraCreated;
     const requiredCanastras = gameState.requiredCanastras || 1;
     const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
-    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
+    const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 1);
 
     if (hand.length - cards.length < minCardsHand) {
-      if (minCardsHand === 2) {
-        socket.emit('error-message', 'No puedes quedarte con menos de 2 cartas en la mano. Necesitas canastas para batir y debes conservar al menos una para tu descarte.');
+      if (minCardsHand === 1) {
+        socket.emit('error-message', `No puedes quedarte sin cartas en la mano sin tener al menos ${requiredCanastras} canasta(s) para batir. Debes conservar al menos una para tu descarte.`);
       } else {
         socket.emit('error-message', 'No puedes quedarte sin cartas en la mano. Debes conservar al menos una para tu descarte.');
       }

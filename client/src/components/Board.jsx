@@ -364,10 +364,16 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
     const card = localHand[draggedIndex];
     if (!card) return;
 
+    let cardsToSend = [card];
+    if (selectedCardIds.includes(card.id) && selectedCardIds.length > 1) {
+      cardsToSend = localHand.filter(c => selectedCardIds.includes(c.id));
+    }
+
     onAction('append-to-meld', { 
       meldIndex: meldIndex, 
-      cards: [card] 
+      cards: cardsToSend 
     });
+    setSelectedCardIds([]);
     setDraggedIndex(null);
   };
 
