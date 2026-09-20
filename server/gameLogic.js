@@ -85,13 +85,9 @@ function validateSequence(cards) {
     return { valid: false, error: 'Una secuencia no puede tener más de un Joker.' };
   }
 
-  // 2. En una secuencia de 3 cartas no se permiten dos doses (por falta de correlación).
-  // En secuencias de 4 o más cartas, un 2 de su mismo palo puede entrar en su posición natural (entre A y 3)
-  // actuando como 2 natural (no cuenta como comodín) y permitiendo otro 2 como comodín en la misma corrida.
-  const twos = cards.filter(c => c.rank === '2');
-  if (cards.length === 3 && twos.length > 1) {
-    return { valid: false, error: 'Una secuencia de 3 cartas no puede tener dos doses.' };
-  }
+  // 2. Cartas especiales (Joker o 2): como máximo 2 si una de ellas es el 2 natural del mismo palo.
+  // Un 2 de su mismo palo entra en su posición natural (ranura 2, entre A y 3) actuando como carta natural
+  // (no cuenta como comodín), permitiendo que otro 2 o Joker actúe como comodín (incluso en corridas de 3 cartas como A♦-2♦-2♣).
 
   // 3. Cartas especiales (Joker o 2): como máximo 2 si una de ellas es el 2 natural del mismo palo
   const specialCards = cards.filter(c => c.rank === 'Joker' || c.rank === '2');
