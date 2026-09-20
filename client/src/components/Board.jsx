@@ -1160,22 +1160,22 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
           {/* Botones de Ordenar y Deshacer */}
           {(() => {
             const myTeamUndos = gameState.teamUndoCounts?.[myTeamIdx] || 0;
-            const oppTeamUndos = gameState.teamUndoCounts?.[oppTeamIdx] || 0;
+            const maxUndos = is4P ? 3 : 2;
+            const remainingUndos = Math.max(0, maxUndos - myTeamUndos);
+
             const isPrevPlayer = safePlayerIndex === (gameState.is4Player 
               ? (gameState.turn - 1 + 4) % 4 
               : (gameState.turn === 0 ? 1 : 0)
             );
 
+            const isCurrentPlayerBot = Boolean(gameState.players?.[gameState.turn]?.isBot);
+
             const canRequestUndo = (
-              // Caso 1: Es mi turno, ya robé y estoy jugando
-              (isMyTurn && !needToDraw) ||
-              // Caso 2: El rival acaba de recibir el turno pero aún no robó carta (puedo deshacer mi descarte)
-              (isPrevPlayer && needToDraw)
-            ) && (
-              myTeamUndos < 2 &&
-              (myTeamUndos === 0 || oppTeamUndos >= 1)
-            );
-            const remainingUndos = 2 - myTeamUndos;
+              // Caso 1: Es mi turno
+              isMyTurn ||
+              // Caso 2: Acabo de descartar y el rival aún no robó carta (o el rival es la IA)
+              (isPrevPlayer && (needToDraw || isCurrentPlayerBot))
+            ) && myTeamUndos < maxUndos;
 
             return (
               <div style={{ display: 'flex', gap: '5px', width: '100%', marginTop: '3px' }}>
@@ -1200,15 +1200,12 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                     background: canRequestUndo ? 'linear-gradient(135deg, #6366f1 0%, #4f46e5 100%)' : 'rgba(255, 255, 255, 0.04)',
                     color: canRequestUndo ? '#ffffff' : '#64748b',
                     borderColor: canRequestUndo ? '#818cf8' : 'rgba(255, 255, 255, 0.05)',
-                    opacity: !canRequestUndo && (myTeamUndos >= 2 || (myTeamUndos === 1 && oppTeamUndos === 0)) ? 0.4 : 1
+                    opacity: canRequestUndo ? 1 : 0.4
                   }}
                   title={!canRequestUndo 
-                    ? (myTeamUndos >= 2 
-                        ? "Llegaste al límite de 2 deshacer" 
-                        : (myTeamUndos === 1 && oppTeamUndos === 0 
-                            ? "Esperá a que el rival use su deshacer" 
-                            : "Solo disponible durante tu turno de juego"
-                          )
+                    ? (myTeamUndos >= maxUndos 
+                        ? `Has agotado los ${maxUndos} deshechos de la partida` 
+                        : "Solo disponible durante tu turno o inmediatamente tras descartar"
                       )
                     : `Deshacer jugada (Quedan ${remainingUndos} usos)`
                   }

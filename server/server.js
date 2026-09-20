@@ -233,13 +233,25 @@ function applyUndoInRoom(room, requesterIdx, teamIdx) {
   newTeamUndoCounts[teamIdx]++;
   const lastUndoTeam = teamIdx;
   
+  // Limpiar timers de IA si estaban pendientes
+  if (room.botTurnTimeout) {
+    clearTimeout(room.botTurnTimeout);
+    room.botTurnTimeout = null;
+  }
+  room.isBotThinking = false;
+
   // Restaurar estado de juego completo en la sala
   room.gameState = JSON.parse(JSON.stringify(savedSnapshot));
   room.gameState.teamUndoCounts = newTeamUndoCounts;
   room.gameState.lastUndoTeam = lastUndoTeam;
   room.gameState.undoRequestedBy = null;
-  room.gameState.lastAction = `Jugada deshecha por ${room.players[requesterIdx].name} con el permiso del rival.`;
+  const oppHumans = room.players.filter((p, idx) => !p.isBot && p.socketId && idx !== requesterIdx);
+  room.gameState.lastAction = `Jugada deshecha por ${room.players[requesterIdx].name}${oppHumans.length > 0 ? ' con el permiso del rival.' : '.'}`;
   
+  // Re-guardar snapshot en el gameState restaurado para permitir un segundo deshacer consecutivo en el mismo turno
+  const { turnStartSnapshot: _ignore, ...currentSnapshotData } = room.gameState;
+  room.gameState.turnStartSnapshot = JSON.parse(JSON.stringify(currentSnapshotData));
+
   sendStateToRoom(room);
 }
 
@@ -488,7 +500,7 @@ function checkAndTriggerBotTurnInRoom(room) {
         room.isBotThinking = false;
         sendStateToRoom(room);
       }
-    }, 1500); // Demora simulando pensar
+    }, 2500); // Demora simulando pensar y permitiendo al usuario deshacer su descarte si fue erróneo
   }
 }
 
@@ -816,14 +828,14 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const card = gameState.drawPile.pop();
+    gameState.players[pIdx].hand.push(card);
+    gameState.turnState = 'play';
+
     if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
       const { turnStartSnapshot, ...snapshotData } = gameState;
       gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
     }
-
-    const card = gameState.drawPile.pop();
-    gameState.players[pIdx].hand.push(card);
-    gameState.turnState = 'play';
     
     if (gameState.isFirstTurn) {
       gameState.firstDrawnCardId = card.id;
@@ -878,17 +890,16 @@ io.on('connection', (socket) => {
       return;
     }
 
-    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
-      const { turnStartSnapshot, ...snapshotData } = gameState;
-      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
-    }
-
     const count = gameState.discardPile.length;
     recordOpponentDrawDiscard(room, pIdx, gameState.discardPile);
     gameState.players[pIdx].hand.push(...gameState.discardPile);
     gameState.discardPile = [];
-    
     gameState.turnState = 'play';
+
+    if (gameState.players[pIdx] && !gameState.players[pIdx].isBot) {
+      const { turnStartSnapshot, ...snapshotData } = gameState;
+      gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapshotData));
+    }
     gameState.lastAction = `${gameState.players[pIdx].name} recogió el pozo entero (${count} cartas).`;
     
     if (gameState.isFirstTurn) {
@@ -1262,8 +1273,21 @@ io.on('connection', (socket) => {
     if (pIdx === -1) return;
     const gameState = room.gameState;
 
-    if (gameState.turn !== pIdx) {
-      socket.emit('error-message', 'Solo puedes deshacer jugadas en tu propio turno.');
+    const maxPlayers = gameState.is4Player ? 4 : 2;
+    const isMyTurn = gameState.turn === pIdx;
+    const prevPlayerIdx = (gameState.turn - 1 + maxPlayers) % maxPlayers;
+    const isPrevPlayer = gameState.is4Player 
+      ? getTeamOwnerIndex(prevPlayerIdx, true) === getTeamOwnerIndex(pIdx, true) 
+      : prevPlayerIdx === pIdx;
+
+    const isCurrentPlayerBot = Boolean(room.players[gameState.turn]?.isBot);
+    // Permitir deshacer:
+    // 1. Durante mi turno de juego
+    // 2. Inmediatamente después de haber descartado una carta al pozo (el turno pasó al siguiente jugador y este aún no robó, o es la IA)
+    const canUndoNow = isMyTurn || (isPrevPlayer && (gameState.turnState === 'draw' || isCurrentPlayerBot));
+
+    if (!canUndoNow) {
+      socket.emit('error-message', 'Solo puedes deshacer durante tu turno o inmediatamente después de haber descartado.');
       return;
     }
 
