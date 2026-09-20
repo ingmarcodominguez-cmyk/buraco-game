@@ -120,6 +120,59 @@ class BuracoRoom {
 
 // Registro global de salas activas
 const rooms = new Map();
+const ROOMS_CACHE_FILE = path.join(__dirname, 'rooms-cache.json');
+
+function saveRoomsToDisk() {
+  try {
+    const data = {};
+    for (const [id, room] of rooms.entries()) {
+      if (room.gameState && (room.gameState.status === 'playing' || room.gameState.status === 'finished-visual')) {
+        data[id] = {
+          id: room.id,
+          players: room.players.map(p => ({ ...p, socketId: p.isBot ? 'bot-socket' : null })),
+          gameState: room.gameState,
+          globalScores: room.globalScores,
+          requiredCanastrasSetting: room.requiredCanastrasSetting,
+          targetScoreSetting: room.targetScoreSetting,
+          isAgainstBotSetting: room.isAgainstBotSetting,
+          is4PlayerSetting: room.is4PlayerSetting,
+          aiMemory: room.aiMemory
+        };
+      }
+    }
+    fs.writeFileSync(ROOMS_CACHE_FILE, JSON.stringify(data), 'utf8');
+  } catch (err) {
+    console.error('Error guardando caché de salas en disco:', err.message);
+  }
+}
+
+function loadRoomsFromDisk() {
+  try {
+    if (fs.existsSync(ROOMS_CACHE_FILE)) {
+      const raw = fs.readFileSync(ROOMS_CACHE_FILE, 'utf8');
+      const data = JSON.parse(raw);
+      for (const id of Object.keys(data)) {
+        const item = data[id];
+        const room = new BuracoRoom(item.id);
+        room.players = item.players || [];
+        room.gameState = item.gameState || null;
+        room.globalScores = item.globalScores || [0, 0];
+        room.requiredCanastrasSetting = item.requiredCanastrasSetting || 1;
+        room.targetScoreSetting = item.targetScoreSetting || 3000;
+        room.isAgainstBotSetting = !!item.isAgainstBotSetting;
+        room.is4PlayerSetting = !!item.is4PlayerSetting;
+        room.aiMemory = item.aiMemory || { knownOpponentHands: {}, discardHistory: [], botHeldHistory: [] };
+        rooms.set(id, room);
+        console.log(`Sala restaurada desde disco: ${id} (${room.players.map(p => p.name).join(', ')})`);
+      }
+    }
+  } catch (err) {
+    console.error('Error cargando caché de salas desde disco:', err.message);
+  }
+}
+
+// Cargar salas persistidas al iniciar el servidor
+loadRoomsFromDisk();
 
 function getOrCreateRoom(roomId) {
   const cleanId = (roomId || 'mesa-1').trim().toLowerCase();
@@ -344,6 +397,9 @@ function sendStateToRoom(room) {
 
   // Chequear si es el turno del bot en esta sala
   checkAndTriggerBotTurnInRoom(room);
+
+  // Persistir estado de las salas en disco para no perder partidas activas
+  saveRoomsToDisk();
 }
 
 function getSanitizedStateForRoom(room, playerIndex) {
@@ -1100,8 +1156,37 @@ io.on('connection', (socket) => {
     // Batida final (cierre con descarte)
     if (hand.length === 1 && hasTakenMorto) {
       if (canastrasCount < requiredCanastras) {
-        socket.emit('error-message', `No puedes cerrar la partida sin tener al menos ${requiredCanastras} canasta(s) hechas.`);
-        return;
+        // CIERRE EN FALSO: El jugador intentó descartar su última carta pero no tiene las canastas requeridas.
+        // Se retrotrae automáticamente su turno para devolverle las cartas a la mano y evitar que la partida quede trabada.
+        if (gameState.turnStartSnapshot) {
+          const savedSnapshot = gameState.turnStartSnapshot;
+          const currentTeamUndos = [...gameState.teamUndoCounts];
+          const lastUndoTeam = gameState.lastUndoTeam;
+          
+          if (room.botTurnTimeout) {
+            clearTimeout(room.botTurnTimeout);
+            room.botTurnTimeout = null;
+          }
+          room.isBotThinking = false;
+
+          // Restaurar estado al inicio del turno del jugador
+          room.gameState = JSON.parse(JSON.stringify(savedSnapshot));
+          room.gameState.teamUndoCounts = currentTeamUndos; // No consumir deshechos del jugador
+          room.gameState.lastUndoTeam = lastUndoTeam;
+          room.gameState.undoRequestedBy = null;
+          room.gameState.lastAction = `⚠️ ${player.name} intentó cerrar con ${canastrasCount} de ${requiredCanastras} canastas requeridas. Jugada retrotraída automáticamente para que pueda descartar conservando cartas.`;
+          
+          // Re-guardar snapshot para futuros deshechos
+          const { turnStartSnapshot: _ignore, ...currentSnapshotData } = room.gameState;
+          room.gameState.turnStartSnapshot = JSON.parse(JSON.stringify(currentSnapshotData));
+
+          socket.emit('error-message', `No puedes cerrar la partida: tienes ${canastrasCount} canasta(s) y se requieren ${requiredCanastras}. Tu jugada fue retrotraída automáticamente para que conserves tus cartas y puedas descartar.`);
+          sendStateToRoom(room);
+          return;
+        } else {
+          socket.emit('error-message', `No puedes cerrar la partida sin tener al menos ${requiredCanastras} canasta(s) hechas.`);
+          return;
+        }
       }
       
       const discarded = hand.splice(cardIdx, 1)[0];
@@ -1295,7 +1380,20 @@ io.on('connection', (socket) => {
     const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
     const maxUndos = gameState.is4Player ? 3 : 2;
 
-    if (gameState.teamUndoCounts[teamIdx] >= maxUndos) {
+    const player = gameState.players[pIdx];
+    const teamMelds = gameState.players[teamIdx].melds;
+    const canastrasCount = teamMelds.filter(m => m.length >= 7).length;
+    const requiredCanastras = gameState.requiredCanastras || 1;
+    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
+
+    const isStuckEmergency = (
+      player &&
+      player.hand.length === 1 &&
+      hasTakenMorto &&
+      canastrasCount < requiredCanastras
+    );
+
+    if (gameState.teamUndoCounts[teamIdx] >= maxUndos && !isStuckEmergency) {
       socket.emit('error-message', `Tu equipo ya ha utilizado el máximo de ${maxUndos} deshechos permitidos en esta partida.`);
       return;
     }

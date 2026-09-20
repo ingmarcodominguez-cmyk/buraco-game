@@ -1170,12 +1170,20 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
 
             const isCurrentPlayerBot = Boolean(gameState.players?.[gameState.turn]?.isBot);
 
+            const isStuckEmergency = (
+              localHand.length === 1 &&
+              isMyTurn &&
+              !needToDraw &&
+              (is4P ? (gameState.mortosTaken?.[myTeamIdx] !== null) : gameState.mortosTaken?.[safePlayerIndex]) &&
+              ((gameState.players?.[myTeamIdx]?.melds || []).filter(m => m.length >= 7).length < (gameState.requiredCanastras || 1))
+            );
+
             const canRequestUndo = (
               // Caso 1: Es mi turno
               isMyTurn ||
               // Caso 2: Acabo de descartar y el rival aún no robó carta (o el rival es la IA)
               (isPrevPlayer && (needToDraw || isCurrentPlayerBot))
-            ) && myTeamUndos < maxUndos;
+            ) && (myTeamUndos < maxUndos || isStuckEmergency);
 
             return (
               <div style={{ display: 'flex', gap: '5px', width: '100%', marginTop: '3px' }}>
@@ -1207,7 +1215,10 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                         ? `Has agotado los ${maxUndos} deshechos de la partida` 
                         : "Solo disponible durante tu turno o inmediatamente tras descartar"
                       )
-                    : `Deshacer jugada (Quedan ${remainingUndos} usos)`
+                    : (isStuckEmergency
+                        ? "⚠️ Estás con 1 carta y sin las canastas necesarias. Presiona para recuperar tus cartas y no trabar la mano."
+                        : `Deshacer jugada (Quedan ${remainingUndos} usos)`
+                      )
                   }
                 >
                   ⏪ Deshacer ({remainingUndos})
