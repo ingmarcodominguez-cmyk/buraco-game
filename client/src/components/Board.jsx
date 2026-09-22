@@ -94,8 +94,8 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
   const [selectedMeldIndex, setSelectedMeldIndex] = useState(null);
   const [localHand, setLocalHand] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
+  const [draggedCardId, setDraggedCardId] = useState(null);
   const [activeTab, setActiveTab] = useState('detalle');
   const [isDevMode, setIsDevMode] = useState(() => localStorage.getItem('buraco_dev_mode') !== 'false');
   const [mortoBanner, setMortoBanner] = useState(null);
@@ -337,8 +337,14 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
   }, [logs]);
 
   // Manejadores de arrastrar y soltar (Drag and Drop) para reordenar la mano
-  const handleDragStart = (e, index) => {
-    e.dataTransfer.setData('text/plain', index);
+  const handleDragStart = (e, card, index) => {
+    try {
+      e.dataTransfer.setData('text/plain', String(card.id));
+      e.dataTransfer.effectAllowed = 'move';
+    } catch (err) {
+      // Ignorar si falla dataTransfer en ciertos entornos
+    }
+    setDraggedCardId(card.id);
     setDraggedIndex(index);
   };
 
@@ -346,22 +352,34 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
     e.preventDefault();
   };
 
-  const handleDrop = (e, targetIndex) => {
+  const handleDrop = (e, targetCard, targetIndex) => {
     e.preventDefault();
-    if (draggedIndex === null || draggedIndex === targetIndex) return;
+    const sourceCardId = draggedCardId || (draggedIndex !== null ? localHand[draggedIndex]?.id : null);
+    setDraggedCardId(null);
+    setDraggedIndex(null);
+
+    if (!sourceCardId || sourceCardId === targetCard?.id) return;
+
+    const fromIdx = localHand.findIndex(c => c.id === sourceCardId);
+    const toIdx = targetIndex !== undefined ? targetIndex : localHand.findIndex(c => c.id === targetCard?.id);
+
+    if (fromIdx === -1 || toIdx === -1 || fromIdx === toIdx) return;
 
     const newHand = [...localHand];
-    const [draggedCard] = newHand.splice(draggedIndex, 1);
-    newHand.splice(targetIndex, 0, draggedCard);
+    const [draggedCard] = newHand.splice(fromIdx, 1);
+    newHand.splice(toIdx, 0, draggedCard);
     
     setLocalHand(newHand);
-    setDraggedIndex(null);
   };
 
   const handleDropOnMeld = (e, meldIndex) => {
     e.preventDefault();
-    if (draggedIndex === null) return;
-    const card = localHand[draggedIndex];
+    const sourceCardId = draggedCardId || (draggedIndex !== null ? localHand[draggedIndex]?.id : null);
+    setDraggedCardId(null);
+    setDraggedIndex(null);
+
+    if (!sourceCardId) return;
+    const card = localHand.find(c => c.id === sourceCardId);
     if (!card) return;
 
     let cardsToSend = [card];
@@ -374,12 +392,38 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
       cards: cardsToSend 
     });
     setSelectedCardIds([]);
-    setDraggedIndex(null);
   };
 
   const handleDragEnd = () => {
+    setDraggedCardId(null);
     setDraggedIndex(null);
   };
+
+  // Limpieza global de drag si el usuario suelta el mouse fuera o se interrumpe el evento
+  useEffect(() => {
+    const handleGlobalEnd = () => {
+      setDraggedCardId(null);
+      setDraggedIndex(null);
+    };
+    window.addEventListener('dragend', handleGlobalEnd);
+    window.addEventListener('mouseup', handleGlobalEnd);
+    window.addEventListener('touchend', handleGlobalEnd);
+    window.addEventListener('drop', handleGlobalEnd);
+    window.addEventListener('blur', handleGlobalEnd);
+    return () => {
+      window.removeEventListener('dragend', handleGlobalEnd);
+      window.removeEventListener('mouseup', handleGlobalEnd);
+      window.removeEventListener('touchend', handleGlobalEnd);
+      window.removeEventListener('drop', handleGlobalEnd);
+      window.removeEventListener('blur', handleGlobalEnd);
+    };
+  }, []);
+
+  // Asegurar limpieza de drag si cambia la mano o el turno
+  useEffect(() => {
+    setDraggedCardId(null);
+    setDraggedIndex(null);
+  }, [localHand.length, gameState?.turn, gameState?.turnState]);
 
   if (!gameState) return null;
 
@@ -389,6 +433,9 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
 
   // Seleccionar/Deseleccionar cartas en mano
   const handleCardClick = (cardId) => {
+    // Al hacer click, siempre limpiar cualquier estado residual de arrastre
+    setDraggedCardId(null);
+    setDraggedIndex(null);
     setSelectedCardIds(prev => {
       if (prev.includes(cardId)) {
         return prev.filter(id => id !== cardId);
@@ -1015,14 +1062,14 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
               <div 
                 key={card.id} 
                 draggable={true}
-                onDragStart={(e) => handleDragStart(e, idx)}
+                onDragStart={(e) => handleDragStart(e, card, idx)}
                 onDragOver={handleDragOver}
-                onDrop={(e) => handleDrop(e, idx)}
+                onDrop={(e) => handleDrop(e, card, idx)}
                 onDragEnd={handleDragEnd}
                 style={{ 
                   position: 'relative',
                   cursor: 'grab',
-                  opacity: draggedIndex === idx ? 0.3 : 1,
+                  opacity: (draggedCardId && draggedCardId === card.id) ? 0.4 : 1,
                   transition: 'opacity 0.15s, transform 0.2s, box-shadow 0.2s',
                   ...(isFirstDrawn ? {
                     boxShadow: '0 0 15px #fbbf24',
