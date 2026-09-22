@@ -94,6 +94,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
   const [selectedMeldIndex, setSelectedMeldIndex] = useState(null);
   const [localHand, setLocalHand] = useState([]);
   const [logs, setLogs] = useState([]);
+  const [startingAlert, setStartingAlert] = useState('');
   const [draggedIndex, setDraggedIndex] = useState(null);
   const [draggedCardId, setDraggedCardId] = useState(null);
   const [activeTab, setActiveTab] = useState('detalle');

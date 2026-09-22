@@ -43,6 +43,49 @@ app.get('/debug-files', (req, res) => {
   }
 });
 
+app.get('/reset-room/:roomId', (req, res) => {
+  try {
+    const cleanId = (req.params.roomId || 'mesa-1').trim().toLowerCase();
+    const room = rooms.get(cleanId);
+    if (room) {
+      if (room.botTurnTimeout) {
+        clearTimeout(room.botTurnTimeout);
+        room.botTurnTimeout = null;
+      }
+      room.players = [];
+      room.gameState = null;
+      room.globalScores = [0, 0];
+      room.isBotThinking = false;
+      saveRoomsToDisk();
+      io.to(cleanId).emit('game-aborted', 'La sala ha sido reiniciada.');
+      io.emit('rooms-summary', getRoomsSummary());
+      return res.json({ success: true, message: `Sala ${cleanId} reiniciada con éxito.` });
+    }
+    res.json({ success: false, message: `Sala ${cleanId} no encontrada.` });
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
+app.get('/debug-rooms', (req, res) => {
+  try {
+    const data = {};
+    for (const [id, r] of rooms.entries()) {
+      data[id] = {
+        players: r.players.map(p => ({ name: p.name, isBot: p.isBot, socketId: p.socketId })),
+        gameStateStatus: r.gameState?.status,
+        turnState: r.gameState?.turnState,
+        turn: r.gameState?.turn,
+        isAgainstBot: r.isAgainstBotSetting,
+        is4Player: r.is4PlayerSetting
+      };
+    }
+    res.json(data);
+  } catch (err) {
+    res.json({ error: err.message });
+  }
+});
+
 if (fs.existsSync(distPath)) {
   console.log(`Servidor configurado para servir frontend desde: ${distPath}`);
   app.use(express.static(distPath, {
@@ -623,7 +666,7 @@ io.on('connection', (socket) => {
     // Humanos activos en esta sala (distintos de este socket)
     const activeHumans = room.players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
     const hasActiveGame = room.gameState && (room.gameState.status === 'playing' || room.gameState.status === 'finished-visual');
-    const isPlayerReconnecting = room.players.some(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
+    const isPlayerReconnecting = room.players.some(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase()) || (room.isAgainstBotSetting && activeHumans.length === 0);
 
     // Si la partida anterior ya finalizó por completo en esta sala y no hay humanos activos, limpiar
     // NOTA: Solo limpiar si el match terminó definitivamente (match-over), NO entre rondas
@@ -635,8 +678,17 @@ io.on('connection', (socket) => {
       room.isBotThinking = false;
     }
 
-    // Regla de sala ocupada: Si hay un juego activo y no es el mismo jugador reconectando
-    if (hasActiveGame && !isPlayerReconnecting) {
+    // Si la partida previa no tiene ningún humano activo conectado y entra un jugador nuevo en sala humana, limpiar sala abandonada
+    if (hasActiveGame && activeHumans.length === 0 && !isPlayerReconnecting && !room.isAgainstBotSetting) {
+      console.log(`Sala ${cleanRoomId} tenía una partida previa sin humanos activos. Reiniciando para nuevo jugador: ${cleanName}`);
+      room.players = [];
+      room.gameState = null;
+      room.globalScores = [0, 0];
+      room.isBotThinking = false;
+    }
+
+    // Regla de sala ocupada: Solo si hay humanos ACTIVOS conectados y no es el mismo jugador reconectando
+    if (hasActiveGame && activeHumans.length > 0 && !isPlayerReconnecting) {
       socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible (ej. Mesa 2).`);
       socket.emit('rooms-summary', getRoomsSummary());
       return;
