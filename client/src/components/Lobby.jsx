@@ -2,7 +2,17 @@
 import React, { useState } from 'react';
 import { User, Users, Globe, ArrowRight, Award } from 'lucide-react';
 
-export default function Lobby({ onJoin, localIp, players, connected, currentRoomId, onRoomChange, roomsSummary = {} }) {
+export default function Lobby({ 
+  onJoin, 
+  localIp, 
+  players, 
+  connected, 
+  currentRoomId, 
+  onRoomChange, 
+  roomsSummary = {},
+  joined = false,
+  onCancelJoin
+}) {
   const [name, setName] = useState(() => {
     try {
       return localStorage.getItem('buraco_player_name') || '';
@@ -14,9 +24,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
   const [customRoomName, setCustomRoomName] = useState('');
   const [requiredCanastras, setRequiredCanastras] = useState(1);
   const [targetScore, setTargetScore] = useState(3000);
-  const [playAgainstBot, setPlayAgainstBot] = useState(false);
   const [is4Player, setIs4Player] = useState(false);
-  const [joined, setJoined] = useState(false);
 
   const currentRoomInfo = selectedRoomOption !== 'custom' ? roomsSummary[selectedRoomOption] : null;
   const isCurrentOccupied = currentRoomInfo ? currentRoomInfo.isOccupied : false;
@@ -33,8 +41,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
     if (onRoomChange) onRoomChange(val.trim() || 'mesa-personalizada');
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
+  const handleJoin = (againstBot) => {
     if (!name.trim()) return;
     if (isCurrentOccupied && !isReconnecting) {
       alert(`La ${selectedRoomOption.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible.`);
@@ -47,8 +54,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
       localStorage.setItem('buraco_player_name', name.trim());
       localStorage.setItem('buraco_room', finalRoomId);
     } catch (err) {}
-    onJoin(name.trim(), requiredCanastras, playAgainstBot, targetScore, is4Player, finalRoomId);
-    setJoined(true);
+    onJoin(name.trim(), requiredCanastras, againstBot, targetScore, is4Player, finalRoomId);
   };
 
   return (
@@ -83,7 +89,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
           {/* Columna Derecha: Formulario de Conexión */}
           <div className="lobby-right-col">
             {!joined ? (
-              <form onSubmit={handleSubmit}>
+              <div className="lobby-form">
                 <div className="form-group" style={{ marginBottom: '14px' }}>
                   <label className="form-label" htmlFor="room-select" style={{ fontSize: '0.8rem', marginBottom: '4px' }}>
                     <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
@@ -143,7 +149,6 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                       onChange={(e) => handleCustomRoomChange(e.target.value)}
                       maxLength={20}
                       style={{ marginTop: '8px', padding: '8px 12px', fontSize: '0.85rem' }}
-                      required
                     />
                   )}
                 </div>
@@ -161,8 +166,13 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                     placeholder="Ej. Viviana"
                     value={name}
                     onChange={(e) => setName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleJoin(false);
+                      }
+                    }}
                     maxLength={15}
-                    required
                     autoFocus
                     style={{ padding: '8px 12px', fontSize: '0.9rem' }}
                   />
@@ -225,18 +235,18 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                   <button 
+                    type="button"
                     className="btn-primary" 
-                    type="submit"
-                    onClick={() => setPlayAgainstBot(false)}
+                    onClick={() => handleJoin(false)}
                     style={{ padding: '10px 16px', fontSize: '0.9rem' }}
                   >
                     {isReconnecting ? 'Reconectarse a la Mesa' : (is4Player ? 'Ingresar a Partida de 4' : 'Ingresar al Juego')} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
                   </button>
                   
                   <button 
+                    type="button"
                     className="btn-primary" 
-                    type="submit"
-                    onClick={() => setPlayAgainstBot(true)}
+                    onClick={() => handleJoin(true)}
                     style={{ 
                       padding: '10px 16px', 
                       fontSize: '0.9rem', 
@@ -247,7 +257,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                     {isReconnecting ? 'Reconectarse contra la PC' : (is4Player ? 'Jugar con Compañero Bot' : 'Jugar contra la PC (IA)')} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
                   </button>
                 </div>
-              </form>
+              </div>
             ) : (
               <div style={{ textAlign: 'center' }}>
                 <div className="lobby-info" style={{ marginBottom: '14px', padding: '10px' }}>
@@ -260,7 +270,7 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                   </div>
                   <p style={{ color: '#94a3b8', fontSize: '0.75rem', margin: '4px 0 0 0' }}>
                     {is4Player 
-                      ? (playAgainstBot ? 'Esperando al segundo jugador...' : 'Esperando a 4 jugadores...')
+                      ? 'Esperando a 4 jugadores...'
                       : 'Esperando al segundo jugador...'
                     }
                   </p>
@@ -284,8 +294,11 @@ export default function Lobby({ onJoin, localIp, players, connected, currentRoom
                 </div>
 
                 <button 
+                  type="button"
                   className="btn-primary" 
-                  onClick={() => window.location.reload()}
+                  onClick={() => {
+                    if (onCancelJoin) onCancelJoin();
+                  }}
                   style={{ 
                     marginTop: '14px', 
                     background: 'rgba(239, 68, 68, 0.15)', 

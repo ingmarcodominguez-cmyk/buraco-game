@@ -655,6 +655,28 @@ io.on('connection', (socket) => {
     socket.emit('rooms-summary', getRoomsSummary());
   });
 
+  // Salir de la sala de espera (lobby)
+  socket.on('leave-lobby', ({ roomId } = {}) => {
+    const cleanId = (roomId || socket.roomId || 'mesa-1').trim().toLowerCase();
+    const room = rooms.get(cleanId);
+    if (room && !room.gameState) {
+      room.players = room.players.filter(p => p.socketId !== socket.id);
+      saveRoomsToDisk();
+      socket.leave(cleanId);
+      socket.roomId = null;
+      io.to(cleanId).emit('lobby-update', {
+        roomId: cleanId,
+        players: room.players.filter(p => !p.isBot).map(p => p.name),
+        isOccupied: false
+      });
+      io.emit('rooms-summary', getRoomsSummary());
+    }
+  });
+
+  socket.on('get-rooms-summary', () => {
+    socket.emit('rooms-summary', getRoomsSummary());
+  });
+
   // Unirse al lobby de una sala y configurar partida
   socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player, roomId }) => {
     const cleanRoomId = (roomId || 'mesa-1').trim().toLowerCase();
@@ -681,6 +703,15 @@ io.on('connection', (socket) => {
     // Si la partida previa no tiene ningún humano activo conectado y entra un jugador nuevo en sala humana, limpiar sala abandonada
     if (hasActiveGame && activeHumans.length === 0 && !isPlayerReconnecting && !room.isAgainstBotSetting) {
       console.log(`Sala ${cleanRoomId} tenía una partida previa sin humanos activos. Reiniciando para nuevo jugador: ${cleanName}`);
+      room.players = [];
+      room.gameState = null;
+      room.globalScores = [0, 0];
+      room.isBotThinking = false;
+      saveRoomsToDisk();
+    }
+
+    // Si la sala está en lobby (sin partida en curso) y no hay humanos activos conectados, limpiar cualquier residuo
+    if (!hasActiveGame && activeHumans.length === 0) {
       room.players = [];
       room.gameState = null;
       room.globalScores = [0, 0];
@@ -1541,9 +1572,14 @@ io.on('connection', (socket) => {
       room.gameState = null;
       room.globalScores = [0, 0];
       room.isBotThinking = false;
-      if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
+      if (room.botTurnTimeout) {
+        clearTimeout(room.botTurnTimeout);
+        room.botTurnTimeout = null;
+      }
+      saveRoomsToDisk();
       io.to(room.id).emit('game-aborted', `${leavingPlayerName} ha abandonado la partida. Se canceló la mesa.`);
       socket.leave(room.id);
+      socket.roomId = null;
       io.emit('rooms-summary', getRoomsSummary());
     }
   });
@@ -1554,7 +1590,18 @@ io.on('connection', (socket) => {
     const index = room.players.findIndex(p => p.socketId === socket.id);
     if (index !== -1) {
       console.log(`Jugador desconectado de sala ${room.id}: ${room.players[index].name}`);
-      room.players[index].socketId = null;
+      if (!room.gameState) {
+        // En el lobby: quitar inmediatamente al jugador desconectado para evitar jugadores fantasmas
+        room.players.splice(index, 1);
+        saveRoomsToDisk();
+        io.to(room.id).emit('lobby-update', {
+          roomId: room.id,
+          players: room.players.filter(p => !p.isBot).map(p => p.name),
+          isOccupied: false
+        });
+      } else {
+        room.players[index].socketId = null;
+      }
     }
 
     const activeHumans = room.players.filter(p => p.socketId && !p.socketId.startsWith('bot-socket') && !p.isBot);
@@ -1566,7 +1613,11 @@ io.on('connection', (socket) => {
         if (stillNoHumans) {
           console.log(`Limpiando sala ${room.id} por inactividad prolongada.`);
           if (room.botTurnTimeout) clearTimeout(room.botTurnTimeout);
-          rooms.delete(room.id);
+          room.players = [];
+          room.gameState = null;
+          room.globalScores = [0, 0];
+          room.isBotThinking = false;
+          saveRoomsToDisk();
           io.emit('rooms-summary', getRoomsSummary());
         }
         room.cleanupTimeout = null;

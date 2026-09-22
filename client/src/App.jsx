@@ -196,9 +196,10 @@ export default function App() {
     // Errores del juego (movimiento inválido, etc.)
     socket.on('error-message', (msg) => {
       setErrorMessage(msg);
-      // Si la sala está ocupada o llena para un usuario que aún no estaba en partida
-      if (sessionStorage.getItem('buraco_in_game') !== 'true') {
+      // Si la sala está ocupada o hay error para unirse, desbloquear inmediatamente el lobby
+      if (!gameState) {
         setJoined(false);
+        sessionStorage.removeItem('buraco_in_game');
       }
     });
 
@@ -207,7 +208,12 @@ export default function App() {
       sessionStorage.removeItem('buraco_in_game');
       setGameState(null);
       setJoined(false);
+      setLobbyPlayers([]);
       setErrorMessage(msg);
+      if (socket && socket.connected) {
+        socket.emit('get-lobby-info', { roomId: currentRoomId });
+        socket.emit('get-rooms-summary');
+      }
     });
 
     return () => {
@@ -220,7 +226,7 @@ export default function App() {
       socket.off('error-message');
       socket.off('game-aborted');
     };
-  }, [playerName, currentRoomId, selectedCanastras, isAgainstBotSetting, selectedTargetScore, is4PlayerSetting, joined]);
+  }, [playerName, currentRoomId, selectedCanastras, isAgainstBotSetting, selectedTargetScore, is4PlayerSetting, joined, gameState]);
 
   // Temporizador para desvanecer el mensaje de error/alerta
   useEffect(() => {
@@ -246,6 +252,16 @@ export default function App() {
       localStorage.setItem('buraco_player_name', name);
     } catch (e) {}
     socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player, roomId });
+  };
+
+  const handleCancelJoin = () => {
+    setJoined(false);
+    sessionStorage.removeItem('buraco_in_game');
+    if (socket && socket.connected) {
+      socket.emit('leave-lobby', { roomId: currentRoomId });
+      socket.emit('get-lobby-info', { roomId: currentRoomId });
+      socket.emit('get-rooms-summary');
+    }
   };
 
   const handleGameAction = (actionName, data = {}) => {
@@ -436,7 +452,7 @@ export default function App() {
               Ingresa la clave de acceso para activar las herramientas de depuración y ver las cartas de la IA en tiempo real.
             </p>
 
-            <form onSubmit={handleDevSubmit}>
+            <div className="dev-form" onKeyDown={(e) => { if (e.key === 'Enter') handleDevSubmit(); }}>
               <input 
                 type="password"
                 autoFocus
@@ -492,7 +508,8 @@ export default function App() {
                   Cancelar
                 </button>
                 <button
-                  type="submit"
+                  type="button"
+                  onClick={handleDevSubmit}
                   style={{
                     padding: '10px 22px',
                     borderRadius: '8px',
@@ -507,7 +524,7 @@ export default function App() {
                   Desbloquear
                 </button>
               </div>
-            </form>
+            </div>
           </div>
         </div>
       )}
@@ -695,10 +712,14 @@ export default function App() {
                 onClick={() => {
                   socket.emit('leave-game');
                   sessionStorage.removeItem('buraco_in_game');
+                  setGameState(null);
+                  setJoined(false);
+                  setLobbyPlayers([]);
                   setShowExitGameConfirm(false);
-                  setTimeout(() => {
-                    window.location.reload();
-                  }, 200);
+                  if (socket && socket.connected) {
+                    socket.emit('get-lobby-info', { roomId: currentRoomId });
+                    socket.emit('get-rooms-summary');
+                  }
                 }}
                 style={{
                   padding: '10px 20px',
@@ -727,6 +748,8 @@ export default function App() {
           currentRoomId={currentRoomId}
           onRoomChange={handleRoomChange}
           roomsSummary={roomsSummary}
+          joined={joined}
+          onCancelJoin={handleCancelJoin}
         />
       ) : (
         <Board 
