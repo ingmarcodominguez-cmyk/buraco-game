@@ -2309,6 +2309,68 @@ function runBotTurnInRoom(room, botIdx) {
 // HELPER: Rango de cartas para la IA
 const BOT_RANK_ORDER = { 'A': 1, '2': 2, '3': 3, '4': 4, '5': 5, '6': 6, '7': 7, '8': 8, '9': 9, '10': 10, 'J': 11, 'Q': 12, 'K': 13 };
 
+// HELPER: Determina si una carta natural está comprometida con una escalera/secuencia
+// de su mismo palo, ya sea en la mano (en desarrollo) o en la mesa.
+// Si está comprometida, se debe preservar al menos 1 copia en mano y evitar
+// canibalizarla para grupos (tríos) a menos que estemos en cierre/emergencia.
+function isCardCommittedToSuitRun(card, hand, melds = []) {
+  if (!card || card.rank === '2' || card.rank === 'Joker') return false;
+  const cardVal = BOT_RANK_ORDER[card.rank];
+  if (!cardVal) return false;
+
+  const cardSlots = card.rank === 'A' ? [1, 14] : [cardVal];
+
+  // 1. Conexión en mano con otra carta natural del mismo palo (excluyendo cartas idénticas)
+  let hasNeighborOrGapInHand = false;
+  let sameSuitNaturalCount = 0;
+
+  hand.forEach(c => {
+    if (c.id !== card.id && c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker') {
+      sameSuitNaturalCount++;
+      if (c.rank !== card.rank) {
+        const otherSlots = c.rank === 'A' ? [1, 14] : [BOT_RANK_ORDER[c.rank] || 0];
+        for (const s1 of cardSlots) {
+          for (const s2 of otherSlots) {
+            const diff = Math.abs(s1 - s2);
+            if (diff === 1 || diff === 2) {
+              hasNeighborOrGapInHand = true;
+            }
+          }
+        }
+      }
+    }
+  });
+
+  if (hasNeighborOrGapInHand) return true;
+
+  // 2. Acumulación del palo: si el bot tiene 2 o más cartas naturales de este mismo palo
+  // (es decir, al menos 3 cartas del palo en mano en total), está armando corridas de ese palo.
+  if (sameSuitNaturalCount >= 2) return true;
+
+  // 3. Conexión con escalera en mesa:
+  // Solo si la carta puede EXPANDIR la escalera en los extremos (a distancia 1 o 2).
+  // Si su rango ya está dentro de la escalera ([minVal, maxVal]), ya no puede entrar a esa corrida.
+  if (melds && Array.isArray(melds)) {
+    const connectsToTable = melds.some(m => {
+      if (m && m.length > 0 && m[0].suit === card.suit) {
+        const rankVals = m.map(mc => BOT_RANK_ORDER[mc.representedRank || mc.rank]).filter(Boolean);
+        if (rankVals.length > 0) {
+          const minVal = Math.min(...rankVals);
+          const maxVal = Math.max(...rankVals);
+          return cardSlots.some(s => {
+            const isInside = s >= minVal && s <= maxVal;
+            return !isInside && (Math.abs(s - minVal) <= 2 || Math.abs(s - maxVal) <= 2);
+          });
+        }
+      }
+      return false;
+    });
+    if (connectsToTable) return true;
+  }
+
+  return false;
+}
+
 // HELPER: Mapea las cartas de un palo en la mano a sus slots posibles (1..14)
 function getSuitCardSlots(hand, suit) {
   const slots = [];
@@ -2670,7 +2732,19 @@ function simulateBotMelding(hand, existingMelds) {
     }
   });
   for (const rank of Object.keys(rankGroups)) {
-    const groupCards = rankGroups[rank];
+    const rawGroupCards = rankGroups[rank];
+    const preservedCards = new Set();
+    const groupCards = [];
+    for (const card of rawGroupCards) {
+      if (isCardCommittedToSuitRun(card, tempHand, tempMelds)) {
+        const key = `${card.suit}-${card.rank}`;
+        if (!preservedCards.has(key)) {
+          preservedCards.add(key);
+          continue;
+        }
+      }
+      groupCards.push(card);
+    }
     if (groupCards.length >= 3) {
       const result = validateMeld(groupCards);
       if (result.valid) {
@@ -2723,7 +2797,19 @@ function simulateBotMelding(hand, existingMelds) {
     });
     for (const rank of Object.keys(remainingGroups)) {
       if (wildcards.length === 0) break;
-      const groupCards = remainingGroups[rank];
+      const rawGroupCards = remainingGroups[rank];
+      const preservedCards = new Set();
+      const groupCards = [];
+      for (const card of rawGroupCards) {
+        if (isCardCommittedToSuitRun(card, tempHand, tempMelds)) {
+          const key = `${card.suit}-${card.rank}`;
+          if (!preservedCards.has(key)) {
+            preservedCards.add(key);
+            continue;
+          }
+        }
+        groupCards.push(card);
+      }
       if (groupCards.length === 2) {
         const wc = wildcards[0];
         const candidate = [...groupCards, wc];
@@ -2989,44 +3075,31 @@ function performOneBotMeldActionInRoom(room, botIdx) {
     // En esta situación de emergencia, ¡DESCARGA TOTAL! No se retiene nada: se bajan todos los grupos posibles
     // para sumar puntos en mesa y evitar penalizaciones de decenas o cientos de puntos en mano.
     const isRivalClosing = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 6;
+    const isEmergency = isRivalClosing || canTakeMortoThisTurn || isCloseToMorto || canWinThisTurn;
 
-    if (!isRivalClosing && isAlreadyMelded && !canTakeMortoThisTurn && !isCloseToMorto) {
-      // Solo en juego tranquilo: si una carta tiene vecino directo (distancia 1) del mismo palo en mano
-      // Y ese palo conecta directamente con una escalera ya bajada en mesa, preservarla para la escalera
-      // (siempre y cuando no esté repetida).
-      groupCards = groupCards.filter(card => {
-        const duplicateCount = botHand.filter(c => c.id !== card.id && c.suit === card.suit && c.rank === card.rank).length;
-        if (duplicateCount > 0) return true; // Si está repetida, se puede usar sin problema
+    if (!isEmergency) {
+      // PROTECCIÓN DE ESCALERAS / CORRIDAS:
+      // En Buraco una Canasta Limpia otorga 200 puntos. Un trío vale apenas 15-30 puntos.
+      // Jamás se deben quemar cartas que forman o conectan con una escalera en mano o mesa
+      // para formar un trío, dejando escaleras rotas o huérfanas en la mano.
+      // Si una carta (palo, rango) está comprometida con una escalera, DEBEMOS PRESERVAR
+      // al menos 1 copia en mano.
+      const preservedCards = new Set();
+      const eligibleGroupCards = [];
 
-        const cardVal = BOT_RANK_ORDER[card.rank] || 0;
-        // Vecino directo a distancia 1 (ej. 7 y 8 de trébol)
-        const hasDirectNeighborInHand = botHand.some(c => 
-          c.id !== card.id && 
-          c.suit === card.suit && 
-          c.rank !== '2' && 
-          c.rank !== 'Joker' && 
-          Math.abs((BOT_RANK_ORDER[c.rank] || 0) - cardVal) === 1
-        );
-
-        // Conecta directamente con una escalera propia ya bajada en mesa de ese mismo palo
-        const connectsToTableRun = botMelds.some(m => {
-          if (m.length > 0 && m[0].suit === card.suit) {
-            const rankVals = m.map(mc => BOT_RANK_ORDER[mc.representedRank || mc.rank]).filter(Boolean);
-            if (rankVals.length > 0) {
-              const minVal = Math.min(...rankVals);
-              const maxVal = Math.max(...rankVals);
-              return Math.abs(cardVal - minVal) <= 2 || Math.abs(cardVal - maxVal) <= 2;
-            }
+      for (const card of groupCards) {
+        const committed = isCardCommittedToSuitRun(card, botHand, botMelds);
+        if (committed) {
+          const key = `${card.suit}-${card.rank}`;
+          if (!preservedCards.has(key)) {
+            // Reservar esta primera copia para la escalera
+            preservedCards.add(key);
+            continue;
           }
-          return false;
-        });
-
-        // Solo proteger si tiene vecino directo Y conecta con escalera en mesa
-        if (hasDirectNeighborInHand && connectsToTableRun) {
-          return false;
         }
-        return true;
-      });
+        eligibleGroupCards.push(card);
+      }
+      groupCards = eligibleGroupCards;
     }
 
     if (groupCards.length >= 3) {
@@ -3506,6 +3579,7 @@ module.exports = {
   canWildcardFormNewMeldInHand,
   canNaturalCardFormIndependentMeldInHand,
   isCardUsefulForFirstTurn,
+  isCardCommittedToSuitRun,
   getConnectionsCount,
   getCardHandConnections,
   validateMeld

@@ -10,6 +10,7 @@ const {
   runBotDiscardPhaseInRoom,
   runBotTurnInRoom,
   isCardUsefulForFirstTurn,
+  isCardCommittedToSuitRun,
   validateMeld
 } = require('./server');
 
@@ -598,6 +599,63 @@ function runAITests() {
     process.exit(1);
   }
   console.log("✅ Prueba 11.B aprobada: La IA ejecutó exitosamente el truco de la primera mano (descartó al pozo y robó otra).");
+
+  // PRUEBA 12: Protección de cartas comprometidas con escalera contra canibalización por tríos
+  // (Caso real: Bot tiene 6♣ y 8♣ en mano, y 5♣, 5♣, 5♠. Debe preservar los 5♣ y NO bajar el trío [5♣, 5♣, 5♠])
+  console.log("\n--- Prueba 12: Protección de cartas de escalera frente a tríos (caso 5♣-5♣-5♠ con 6♣-8♣) ---");
+  const roomStraightProtection = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'C', rank: '5', id: 'c5_1' },
+            { suit: 'C', rank: '5', id: 'c5_2' },
+            { suit: 'S', rank: '5', id: 's5_1' },
+            { suit: 'C', rank: '6', id: 'c6' },
+            { suit: 'C', rank: '8', id: 'c8' },
+            { suit: 'S', rank: '7', id: 's7' },
+            { suit: 'S', rank: '8', id: 's8' },
+            { suit: 'H', rank: '2', id: 'h2' } // Comodín 2
+          ], 
+          melds: []
+        }
+      ],
+      mortosTaken: [false, false],
+      discardPile: [{ suit: 'D', rank: 'K' }],
+      drawPile: new Array(30).fill({ suit: 'H', rank: 'A' }),
+      requiredCanastras: 1
+    }
+  };
+
+  // Verificar primero la función auxiliar isCardCommittedToSuitRun
+  const testHand = roomStraightProtection.gameState.players[1].hand;
+  const c5_1 = testHand[0];
+  const s5_1 = testHand[2];
+  if (!isCardCommittedToSuitRun(c5_1, testHand, [])) {
+    console.error("❌ Falló Prueba 12: 5♣ debería detectarse como comprometido con la escalera de tréboles (6♣-8♣)!");
+    process.exit(1);
+  }
+  if (!isCardCommittedToSuitRun(s5_1, testHand, [])) {
+    console.error("❌ Falló Prueba 12: 5♠ debería detectarse como comprometido con la escalera de piques (7♠-8♠)!");
+    process.exit(1);
+  }
+
+  // Ejecutar acción de bajada del bot: NO debe bajar el trío de 5s [5♣, 5♣, 5♠]
+  performOneBotMeldActionInRoom(roomStraightProtection, 1);
+  const botMeldsAfter = roomStraightProtection.gameState.players[1].melds;
+  const loweredTrioOfFives = botMeldsAfter.some(m => m.every(c => c.rank === '5'));
+  if (loweredTrioOfFives) {
+    console.error("❌ Falló Prueba 12: La IA canibalizó sus 5♣ en un trío de 15 pts en vez de guardarlos para la escalera!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 12 aprobada: La IA protege sus 5s para las escaleras de tréboles y piques y no baja el trío.");
 
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
