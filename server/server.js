@@ -2490,10 +2490,15 @@ function canWildcardFormNewMeldInHand(wildcard, hand) {
 function isCardUsefulForFirstTurn(card, handWithoutCard) {
   if (!card) return false;
 
-  // 1. Un comodín (2 o Joker) SIEMPRE sirve
+  // 1. Un comodín (2 o Joker) SIEMPRE sirve y se conserva
   if (card.rank === '2' || card.rank === 'Joker') return true;
 
-  // 2. ¿Forma o completa algún juego (secuencia o grupo) junto con cartas de la mano?
+  // 2. ¿Forma o completa algún juego nuevo (secuencia o grupo de 3+) junto con cartas de la mano?
+  const fullHand = [...handWithoutCard, card];
+  if (canNaturalCardFormIndependentMeldInHand(card, fullHand)) {
+    return true;
+  }
+
   for (let i = 0; i < handWithoutCard.length; i++) {
     for (let j = i + 1; j < handWithoutCard.length; j++) {
       if (validateMeld([handWithoutCard[i], handWithoutCard[j], card]).valid) {
@@ -2502,32 +2507,10 @@ function isCardUsefulForFirstTurn(card, handWithoutCard) {
     }
   }
 
-  // 3. ¿Tiene pareja en mano del mismo número? (Camino a trío: ya tiene 1 o más cartas iguales)
-  const sameRankCount = handWithoutCard.filter(c => c.rank === card.rank && c.rank !== '2' && c.rank !== 'Joker').length;
-  if (sameRankCount >= 1) {
-    return true;
-  }
-
-  // 4. ¿Tiene vecinos directos (distancia 1) o conectores con hueco (distancia 2) del mismo palo? (Camino a corrida)
-  const cardVal = BOT_RANK_ORDER[card.rank];
-  if (cardVal) {
-    const cardSlots = card.rank === 'A' ? [1, 14] : [cardVal];
-    const sameSuitCards = handWithoutCard.filter(c => c.suit === card.suit && c.rank !== '2' && c.rank !== 'Joker');
-    for (const sc of sameSuitCards) {
-      const scVal = BOT_RANK_ORDER[sc.rank];
-      if (!scVal) continue;
-      const scSlots = sc.rank === 'A' ? [1, 14] : [scVal];
-      for (const cSlot of cardSlots) {
-        for (const sSlot of scSlots) {
-          const diff = Math.abs(cSlot - sSlot);
-          if (diff === 1 || diff === 2) {
-            return true;
-          }
-        }
-      }
-    }
-  }
-
+  // 3. Si NO es comodín y NO completa un juego de 3 cartas de inmediato:
+  // En Buraco, conservar una carta que no hace juego es un error porque desperdicia
+  // "el truco de la mano": la oportunidad gratuita de descartar esa primera carta al pozo
+  // y robar otra nueva del mazo con alta probabilidad de sacar comodín (2 o Joker) o completar un juego real.
   return false;
 }
 
@@ -3522,6 +3505,7 @@ module.exports = {
   runBotTurnInRoom,
   canWildcardFormNewMeldInHand,
   canNaturalCardFormIndependentMeldInHand,
+  isCardUsefulForFirstTurn,
   getConnectionsCount,
   getCardHandConnections,
   validateMeld

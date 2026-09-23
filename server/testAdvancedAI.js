@@ -9,6 +9,7 @@ const {
   performOneBotMeldActionInRoom,
   runBotDiscardPhaseInRoom,
   runBotTurnInRoom,
+  isCardUsefulForFirstTurn,
   validateMeld
 } = require('./server');
 
@@ -495,6 +496,108 @@ function runAITests() {
     process.exit(1);
   }
   console.log(`✅ Prueba 10 aprobada: La IA descartó la carta basura (${thrownCard.rank} de ${thrownCard.suit}) y preservó intacto su juego de piques.`);
+
+  // PRUEBA 11: Técnica del primer descarte de la mano (Truco de la primera carta)
+  console.log("\n--- Prueba 11: Técnica de descarte de la primera carta que no sirve (Mano) ---");
+  const handNoMelds = [
+    { suit: 'H', rank: '4', id: 'h4' },
+    { suit: 'H', rank: '8', id: 'h8' },
+    { suit: 'S', rank: '3', id: 's3' },
+    { suit: 'S', rank: '9', id: 's9' },
+    { suit: 'D', rank: '6', id: 'd6' },
+    { suit: 'C', rank: 'K', id: 'ck' }
+  ];
+
+  // 11.A: Si roba un conector con hueco (ej. 6 de corazón con 4 y 8) o una pareja suelta, NO sirve
+  const gutshotCard = { suit: 'H', rank: '6', id: 'draw_h6' };
+  const pairCard = { suit: 'C', rank: 'K', id: 'draw_ck' };
+  const wildcardCard = { suit: 'D', rank: '2', id: 'draw_d2' };
+  const jokerCard = { suit: 'Joker', rank: 'Joker', id: 'draw_joker' };
+  const meldCard = { suit: 'H', rank: '5', id: 'draw_h5' }; // Si tuviéramos 4 y 6 formaría 4-5-6
+
+  if (isCardUsefulForFirstTurn(gutshotCard, handNoMelds)) {
+    console.error("❌ Falló Prueba 11.A: isCardUsefulForFirstTurn no debería considerar útil un simple conector con hueco en el turno 1!");
+    process.exit(1);
+  }
+  if (isCardUsefulForFirstTurn(pairCard, handNoMelds)) {
+    console.error("❌ Falló Prueba 11.A: isCardUsefulForFirstTurn no debería considerar útil una simple pareja en el turno 1!");
+    process.exit(1);
+  }
+  if (!isCardUsefulForFirstTurn(wildcardCard, handNoMelds)) {
+    console.error("❌ Falló Prueba 11.A: isCardUsefulForFirstTurn DEBE considerar útil un 2 comodín!");
+    process.exit(1);
+  }
+  if (!isCardUsefulForFirstTurn(jokerCard, handNoMelds)) {
+    console.error("❌ Falló Prueba 11.A: isCardUsefulForFirstTurn DEBE considerar útil un Joker!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 11.A aprobada: isCardUsefulForFirstTurn rechaza correctamente cartas que no hacen juego y acepta comodines.");
+
+  // 11.B: Verificación de ejecución del bot en sala cuando es mano (isFirstTurn === true)
+  const roomFirstTurn = {
+    players: [
+      { id: 'player1', name: 'Humano', hand: [1, 2, 3], melds: [] },
+      { 
+        id: 'bot', 
+        name: 'Bot', 
+        isBot: true, 
+        hand: [
+          { suit: 'H', rank: '4', id: 'h4' },
+          { suit: 'H', rank: '8', id: 'h8' },
+          { suit: 'S', rank: 'K', id: 'sk' }
+        ], 
+        melds: []
+      }
+    ],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'H', rank: '4', id: 'h4' },
+            { suit: 'H', rank: '8', id: 'h8' },
+            { suit: 'S', rank: 'K', id: 'sk' }
+          ], 
+          melds: []
+        }
+      ],
+      mortosTaken: [false, false],
+      discardPile: [],
+      // Primera carta en la cima del mazo: una carta inútil (ej. 10 de Diamante)
+      // Segunda carta: un 7 de Diamante
+      drawPile: [
+        { suit: 'D', rank: '7', id: 'deck_d7' },
+        { suit: 'D', rank: '10', id: 'first_d10' }
+      ],
+      turnState: 'draw',
+      isFirstTurn: true,
+      lastAction: ''
+    }
+  };
+
+  runBotTurnInRoom(roomFirstTurn, 1);
+
+  // La primera carta (10 de Diamante) debe haber sido descartada al pozo
+  if (roomFirstTurn.gameState.discardPile.length === 0 || roomFirstTurn.gameState.discardPile[0].id !== 'first_d10') {
+    console.error("❌ Falló Prueba 11.B: La IA no usó el truco de descartar la primera carta al pozo!");
+    process.exit(1);
+  }
+  // La IA debe haber robado la segunda carta (7 de Diamante)
+  if (!roomFirstTurn.gameState.players[1].hand.some(c => c.id === 'deck_d7')) {
+    console.error("❌ Falló Prueba 11.B: La IA no robó la segunda carta del mazo!");
+    process.exit(1);
+  }
+  // isFirstTurn debe haber quedado en false
+  if (roomFirstTurn.gameState.isFirstTurn) {
+    console.error("❌ Falló Prueba 11.B: isFirstTurn debería haber quedado en false tras usar el truco!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 11.B aprobada: La IA ejecutó exitosamente el truco de la primera mano (descartó al pozo y robó otra).");
 
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
