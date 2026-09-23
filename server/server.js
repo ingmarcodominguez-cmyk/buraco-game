@@ -2820,7 +2820,7 @@ function performOneBotMeldActionInRoom(room, botIdx) {
     const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
     const createsCanastra = currentMeld.length >= 6;
     const canBatAfterThis = botHasMorto && (canastrasCount >= requiredCanastras || createsCanastra);
-    const minCardsHand = !botHasMorto ? 0 : (canBatAfterThis ? 0 : 1);
+    const minCardsHand = !botHasMorto ? 0 : (canBatAfterThis ? 0 : 2);
 
     for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
       const card = botHand[cIdx];
@@ -3279,44 +3279,34 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
     }
   }
 
-  if (botHand.length === 1 && shouldWin) {
-    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
-    const canastrasCount = botMelds.filter(m => m.length >= 7).length;
-    const requiredCanastras = gameState.requiredCanastras || 1;
+  const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[botIdx];
+  const canastrasCount = botMelds.filter(m => m.length >= 7).length;
+  const requiredCanastras = gameState.requiredCanastras || 1;
 
-    if (hasTakenMorto && canastrasCount >= requiredCanastras) {
-      botHand.splice(discardIdx, 1);
-      recordDiscardCard(room, botIdx, cardToDiscard);
-      gameState.discardPile.push(cardToDiscard);
-      gameState.status = 'finished-visual';
-      gameState.winner = botIdx;
-      gameState.turnState = 'match-over-visual';
-      gameState.lastAction = `¡${botPlayer.name} ha batido la mano!`;
-      gameState.cutterIndex = botIdx;
-      
-      gameState.roundScores = calculateRoundScores(gameState);
-      
-      room.isBotThinking = false;
-      sendStateToAll();
-      return;
-    } else {
-      if (!hasTakenMorto) {
-        botHand.splice(discardIdx, 1);
-        recordDiscardCard(room, botIdx, cardToDiscard);
-        gameState.discardPile.push(cardToDiscard);
-        gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
-        checkMortoIndirect(botIdx);
-      } else {
-        gameState.lastAction = `${botPlayer.name} pasa sin descartar por falta de canastas o decisión estratégica.`;
-      }
-    }
-  } else {
+  // Batida final (cierre con descarte): Solo si le queda 1 carta, tiene muerto, tiene las canastas requeridas Y decide ganar
+  if (botHand.length === 1 && hasTakenMorto && canastrasCount >= requiredCanastras && shouldWin) {
     botHand.splice(discardIdx, 1);
     recordDiscardCard(room, botIdx, cardToDiscard);
     gameState.discardPile.push(cardToDiscard);
-    gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
-    checkMortoIndirect(botIdx);
+    gameState.status = 'finished-visual';
+    gameState.winner = botIdx;
+    gameState.turnState = 'match-over-visual';
+    gameState.lastAction = `¡${botPlayer.name} ha batido la mano!`;
+    gameState.cutterIndex = botIdx;
+    
+    gameState.roundScores = calculateRoundScores(gameState);
+    
+    room.isBotThinking = false;
+    sendStateToAll();
+    return;
   }
+
+  // EN TODOS LOS DEMÁS CASOS: DESCARTAR OBLIGATORIAMENTE AL POZO
+  botHand.splice(discardIdx, 1);
+  recordDiscardCard(room, botIdx, cardToDiscard);
+  gameState.discardPile.push(cardToDiscard);
+  gameState.lastAction = `${botPlayer.name} descartó ${cardToDiscard.rank} de ${cardToDiscard.suit}.`;
+  checkMortoIndirect(botIdx);
 
   // Pasar turno al siguiente jugador (respetando sentido antihorario)
   const nextTurn = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
@@ -3420,7 +3410,7 @@ function tryMeldBotRunInRoom(room, cardsToMeld, botIdx, hasMelded) {
   const newCanastraCreated = result.cards.length >= 7 ? 1 : 0;
   const totalCanastrasAfter = canastrasCount + newCanastraCreated;
   const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
-  const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 1);
+  const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
 
   if (botHand.length - cardsToMeld.length < minCardsHand) {
     return false; // Evitar bajar si nos deja con menos cartas de las permitidas

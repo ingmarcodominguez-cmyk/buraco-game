@@ -7,6 +7,7 @@ const {
   evaluatePilePotential,
   simulateBotMelding,
   performOneBotMeldActionInRoom,
+  runBotDiscardPhaseInRoom,
   runBotTurnInRoom,
   validateMeld
 } = require('./server');
@@ -239,7 +240,70 @@ function runAITests() {
     console.error(`❌ Falló Prueba 5: Se esperaba que quedara con 1 carta para descartar, pero tiene ${roomBatidaPrep.gameState.players[1].hand.length}`);
     process.exit(1);
   }
-  console.log("✅ Prueba 5 aprobada: La IA baja sus cartas quedando con 1 carta lista para el corte.");
+  console.log("✅ Prueba 5.A aprobada: La IA baja sus cartas quedando con 1 carta lista para el corte.");
+
+  runBotDiscardPhaseInRoom(roomBatidaPrep, 1);
+  if (roomBatidaPrep.gameState.status !== 'finished-visual') {
+    console.error("❌ Falló Prueba 5.B: La IA debería haber cerrado la mano al tener canasta y descartar su última carta!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 5.B aprobada: La IA descarta su última carta al pozo y bate legalmente.");
+
+
+  // PRUEBA 6: Sin canasta, la IA NUNCA baja quedándose con 1 carta ni pasa sin descartar
+  console.log("\n--- Prueba 6: Sin canasta, prohibido bajar a 1 carta y descarte obligatorio ---");
+  const roomNoCanasta = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3, 4, 5], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'H', rank: 'K', id: 'k1' },
+            { suit: 'D', rank: 'K', id: 'k2' },
+            { suit: 'S', rank: 'K', id: 'k3' },
+            { suit: 'C', rank: '3', id: 'discardCard' }
+          ], 
+          melds: [
+            // 0 canastas: solo un juego de 5 cartas
+            [
+              { suit: 'H', rank: '3' }, { suit: 'H', rank: '4' }, { suit: 'H', rank: '5' },
+              { suit: 'H', rank: '6' }, { suit: 'H', rank: '7' }
+            ]
+          ]
+        }
+      ],
+      mortosTaken: [true, true], // Tiene muerto pero 0 canastas
+      discardPile: [],
+      drawPile: new Array(20).fill({ suit: 'H', rank: 'A' }),
+      requiredCanastras: 1
+    }
+  };
+
+  // Intentar bajar: con 4 cartas (trío de K + 1 carta), si baja el trío quedaría con 1 carta sin canasta
+  const didMeldWithoutCanasta = performOneBotMeldActionInRoom(roomNoCanasta, 1);
+  if (didMeldWithoutCanasta) {
+    console.error("❌ Falló Prueba 6.A: La IA bajó quedándose con 1 carta sin tener canastas!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 6.A aprobada: La IA NO baja a 1 carta si no tiene canastas (retiene mínimo 2 cartas).");
+
+  // Fase de descarte: DEBE descartar obligatoriamente al pozo
+  runBotDiscardPhaseInRoom(roomNoCanasta, 1);
+  if (roomNoCanasta.gameState.discardPile.length !== 1) {
+    console.error("❌ Falló Prueba 6.B: La IA no descartó al pozo! (Quedó vacío)");
+    process.exit(1);
+  }
+  if (roomNoCanasta.gameState.players[1].hand.length !== 3) {
+    console.error("❌ Falló Prueba 6.B: La IA debería tener 3 cartas tras descartar 1!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 6.B aprobada: La IA descartó obligatoriamente al pozo (el pozo nunca queda sin descarte).");
 
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
