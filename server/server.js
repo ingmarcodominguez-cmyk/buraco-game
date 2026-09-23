@@ -304,7 +304,8 @@ function recordDiscardCard(room, playerIdx, card) {
     id: card.id,
     suit: card.suit,
     rank: card.rank,
-    value: card.value
+    value: card.value,
+    playerIdx: playerIdx
   });
 }
 
@@ -424,7 +425,7 @@ function performSorteoInRoom(room, is4Player) {
 
 // Envía el estado sanitizado solo a los jugadores de esta sala específica
 function sendStateToRoom(room) {
-  if (!room || !room.gameState) return;
+  if (!room || !room.gameState || !Array.isArray(room.players)) return;
 
   room.players.forEach((player, index) => {
     if (player.socketId && player.socketId !== 'bot-socket' && !player.socketId.startsWith('bot-socket-')) {
@@ -1870,7 +1871,7 @@ function getProbabilityOfCard(suit, rank, tracker) {
 // ============================================================================
 // EVALUADOR TÁCTICO DE PELIGRO DE DESCARTE CONTRA LA MANO CONOCIDA DEL RIVAL
 // ============================================================================
-function evaluateDiscardDangerAgainstOpponent(card, knownOpponentCards, opponentMelds, tracker, opponentHandSize) {
+function evaluateDiscardDangerAgainstOpponent(card, knownOpponentCards, opponentMelds, tracker, opponentHandSize, opponentDiscardHistory = []) {
   let dangerScore = 0;
   let dangerReason = '';
 
@@ -1881,7 +1882,54 @@ function evaluateDiscardDangerAgainstOpponent(card, knownOpponentCards, opponent
 
   const cardRankVal = RANK_ORDER_VALS[card.rank] || 0;
 
-  // 1. PELIGRO CONTRA CARTAS CONOCIDAS EN MANO DEL OPONENTE (Información pública 100% real)
+  // 1. ANÁLISIS DE CARTAS MUERTAS (Ambas copias vistas -> Imposible que forme nuevas combinaciones en mano del rival)
+  if (tracker && tracker.getRemainingCount(card.suit, card.rank) === 0) {
+    dangerScore -= 25000;
+    dangerReason = 'Carta muerta (ambas copias ya vistas en el juego)';
+  }
+
+  // 2. ANÁLISIS DE PALOS FRÍOS Y DESCARTES PREVIOS DEL RIVAL (Lectura de descartes)
+  if (opponentDiscardHistory && opponentDiscardHistory.length > 0) {
+    // A) Si el rival ya descartó esta carta exacta antes (ej. tiró 10♠ y ahora tenemos el otro 10♠)
+    const opponentThrewSame = opponentDiscardHistory.some(d => d.suit === card.suit && d.rank === card.rank);
+    if (opponentThrewSame) {
+      dangerScore -= 35000;
+      dangerReason = `Carta fría: el rival ya descartó un ${card.rank} de ${card.suit}`;
+    }
+
+    // B) Palos fríos: ¿Cuántas cartas de este palo ha descartado el rival?
+    const suitDiscards = opponentDiscardHistory.filter(d => d.suit === card.suit).length;
+    if (suitDiscards >= 3) {
+      dangerScore -= 28000;
+      if (!dangerReason) dangerReason = `Palo frío (${suitDiscards} descartes del rival en ${card.suit})`;
+    } else if (suitDiscards >= 1) {
+      dangerScore -= 14000;
+      if (!dangerReason) dangerReason = `Palo descartado por el rival (${suitDiscards} en ${card.suit})`;
+    } else {
+      // El rival NO ha descartado NUNCA de este palo.
+      // Si además la carta es central (6, 7, 8, 9), el peligro de alimentarle una escalera es muy alto
+      if (cardRankVal >= 6 && cardRankVal <= 9) {
+        dangerScore += 22000;
+        if (!dangerReason) dangerReason = `Palo caliente sin descartes del rival y carta central conectora (${card.rank} de ${card.suit})`;
+      } else if (cardRankVal >= 5 && cardRankVal <= 10) {
+        dangerScore += 10000;
+        if (!dangerReason) dangerReason = `Palo no tocado por el rival y conector medio (${card.rank})`;
+      }
+    }
+  } else {
+    // Sin descartes previos: penalizar cartas centrales
+    if (cardRankVal >= 6 && cardRankVal <= 9) {
+      dangerScore += 16000;
+      if (!dangerReason) dangerReason = `Carta central conectora (${card.rank})`;
+    }
+  }
+
+  // Las cartas extremas (As, K, 3) tienen naturalmente menor radio de conexión (solo un lado)
+  if (card.rank === 'A' || card.rank === 'K' || card.rank === '3') {
+    dangerScore -= 9000;
+  }
+
+  // 3. PELIGRO CONTRA CARTAS CONOCIDAS EN MANO DEL OPONENTE (Información pública 100% real)
   if (knownOpponentCards && knownOpponentCards.length > 0) {
     // A) Peligro de grupo / trío (Mismo rango)
     const sameRankCount = knownOpponentCards.filter(c => c.rank === card.rank).length;
@@ -1960,7 +2008,7 @@ function evaluateDiscardDangerAgainstOpponent(card, knownOpponentCards, opponent
     }
   }
 
-  // 2. PELIGRO CONTRA JUEGOS BAJADOS EN LA MESA POR EL RIVAL
+  // 4. PELIGRO CONTRA JUEGOS BAJADOS EN LA MESA POR EL RIVAL
   if (opponentMelds && opponentMelds.length > 0) {
     let servesMeld = false;
     let createsCanastra = false;
@@ -2132,38 +2180,41 @@ function runBotTurnInRoom(room, botIdx) {
         // para acoplar a sus juegos (ej. K de trébol) o hay comodines, ¡LEVANTAR!
         const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
 
-        // 1. Si la carta superior sirve de inmediato (acople, nueva combinación o comodín):
-        if (topCardServes) {
-          // Si el rival tiene muerto (pero 0 canastas), levantar si el pozo no satura en exceso (<= 3 cartas no bajables)
-          if (!opponentHasMorto || unplayableAdded <= 3) {
-            drewFromDiscard = true;
-          }
-        }
-        // 2. Si hay algún comodín en el pozo (2 o Joker):
-        else if (pileEval.hasWildcard || isWildcard) {
+        // 1. Si hay algún comodín en el pozo (2 o Joker) o la superior es comodín: ¡SIEMPRE LEVANTAR!
+        if (pileEval.hasWildcard || isWildcard) {
           drewFromDiscard = true;
         }
-        // 3. Si la carta superior conecta con la mano (para futura escalera o triada):
-        else if (pileEval.topConn > 0) {
-          if (!opponentHasMorto || unplayableAdded <= 2) {
+        // 2. Si la carta superior sirve de inmediato (acople o nueva combinación):
+        else if (topCardServes) {
+          if (!opponentCanWinSoon || unplayableAdded <= 4) {
             drewFromDiscard = true;
           }
         }
-        // 4. Si el pozo contiene cartas útiles que conectan con la mano:
-        else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
-          if (!opponentHasMorto || unplayableAdded <= 2) {
-            drewFromDiscard = true;
-          }
-        }
-        // 5. Si al recoger el pozo puede bajar al menos un juego de inmediato:
+        // 3. Si al recoger el pozo puede bajar al menos un juego de inmediato (3+ cartas):
         else if (cardsGainedFromPile >= 3) {
           drewFromDiscard = true;
         }
-        // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
-        else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
-          if (!opponentHasMorto) {
+        // 4. Si la carta superior conecta con la mano (camino a corrida o trío):
+        else if (pileEval.topConn > 0) {
+          if (!opponentCanWinSoon || unplayableAdded <= 3) {
             drewFromDiscard = true;
           }
+        }
+        // 5. Si el pozo contiene cartas útiles que conectan con la mano:
+        else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
+          if (!opponentCanWinSoon || unplayableAdded <= 3) {
+            drewFromDiscard = true;
+          }
+        }
+        // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
+        else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
+          if (!opponentCanWinSoon) {
+            drewFromDiscard = true;
+          }
+        }
+        // 7. Volumen táctico: pozos grandes (>= 5 cartas) que enriquecen la mano para canastas múltiples
+        else if (gameState.discardPile.length >= 5 && unplayableAdded <= 6 && !opponentCanWinSoon) {
+          drewFromDiscard = true;
         }
       }
     }
@@ -2769,7 +2820,7 @@ function performOneBotMeldActionInRoom(room, botIdx) {
     const isCurrentCleanCanastra = currentMeld.length >= 7 && !currentMeld.some(c => c && c.isUsedAsWildcard);
     const createsCanastra = currentMeld.length >= 6;
     const canBatAfterThis = botHasMorto && (canastrasCount >= requiredCanastras || createsCanastra);
-    const minCardsHand = !botHasMorto ? 0 : (canBatAfterThis ? 0 : 2);
+    const minCardsHand = !botHasMorto ? 0 : (canBatAfterThis ? 0 : 1);
 
     for (let cIdx = 0; cIdx < botHand.length; cIdx++) {
       const card = botHand[cIdx];
@@ -2791,6 +2842,15 @@ function performOneBotMeldActionInRoom(room, botIdx) {
           const runSuit = currentMeld.find(rc => rc.rank !== 'Joker' && rc.rank !== '2')?.suit;
           const hasSuitTwo = currentMeld.some(c => c && c.rank === '2' && c.suit === runSuit);
           if (!hasSuitTwo) continue;
+        }
+
+        // PROTECCIÓN DE CANASTA LIMPIA EN CURSO (4, 5 o 6 cartas naturales):
+        // No ensuciar un juego natural limpio de 4 a 6 cartas con un comodín
+        // a menos que sea para cerrar la partida, ir al muerto directo, o defensa extrema ante corte rival
+        const isCleanRunBuilding = currentMeld.length >= 4 && !currentMeld.some(c => c && c.isUsedAsWildcard);
+        const isEmergencyOrClosing = canWinThisTurn || canTakeMortoThisTurn || opponentImminentWin || isDefensiveSurvivalMode || deckCount <= 8;
+        if (isCleanRunBuilding && !isEmergencyOrClosing) {
+          continue; // Preservar los 200 puntos potenciales de la canasta limpia
         }
 
         // PRIORIDAD TÁCTICA DE COMODINES:
@@ -2849,18 +2909,52 @@ function performOneBotMeldActionInRoom(room, botIdx) {
   }
 
   // 2. Intentar bajar exactamente un juego nuevo
-  const suits = ['H', 'D', 'C', 'S'];
+  // UMBRAL ESTRATÉGICO DE LOS 30 PUNTOS:
+  // Si la IA aún no tiene juegos en mesa (botMeldPoints === 0):
+  // Para desbloquear el pozo en Buraco se requieren obligatoriamente 30 puntos en mesa.
+  // Si la suma de todas las combinaciones posibles en mano NO alcanza 30 puntos (sim.points < 30),
+  // retener las cartas en mano en juego normal en lugar de quemar un trío o corrida aislada de 15 puntos
+  // que dejaría el pozo bloqueado y expondría cartas ante el rival.
+  const canReach30ThisTurn = (botMeldPoints + sim.points) >= 30;
+  if (!isAlreadyMelded && !canReach30ThisTurn && !opponentImminentWin && !isDefensiveSurvivalMode && deckCount > 15) {
+    return false; // Retención táctica: esperar a acumular los 30 puntos para abrir el pozo
+  }
 
-  // Bajar secuencias limpias de 3 o más (incluyendo As alto y 2 natural)
+  const suits = ['H', 'D', 'C', 'S'];
+  const allCleanRuns = [];
   for (let suit of suits) {
     const { foundRuns } = extractCleanRunsForSuit(botHand, suit);
     for (const run of foundRuns) {
-      if (run.length >= 10) {
-        // Prioridad táctica: Si tiene 10 o más cartas continuas, bajar primero una canasta limpia de 7 cartas
-        // y dejar el resto (3+ cartas) en mano para bajarlas en la siguiente acción como juego separado.
-        const canastaCards = run.slice(run.length - 7);
-        if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
-      } else if (run.length >= 3) {
+      const runPoints = run.reduce((sum, c) => sum + (CARD_VALUES[c.rank] || 0), 0);
+      allCleanRuns.push({ run, points: runPoints, length: run.length });
+    }
+  }
+
+  // Ordenar secuencias limpias:
+  // 1. Canastas completas (>= 7 cartas) primero
+  // 2. Mayor longitud primero
+  // 3. Mayor puntuación primero (ej. 10-J-Q-K antes que 3-4-5-6 para alcanzar los 30 pts)
+  allCleanRuns.sort((a, b) => {
+    if (a.length >= 7 && b.length < 7) return -1;
+    if (b.length >= 7 && a.length < 7) return 1;
+    if (b.length !== a.length) return b.length - a.length;
+    return b.points - a.points;
+  });
+
+  for (const item of allCleanRuns) {
+    const run = item.run;
+    if (run.length >= 10) {
+      const canastaCards = run.slice(run.length - 7);
+      if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
+    } else if (run.length >= 4) {
+      if (tryMeldBotRun(run, botIdx, true)) return true;
+    } else if (run.length === 3) {
+      // Secuencia limpia de 3 cartas:
+      // Si necesitamos puntos para llegar a 30 (botMeldPoints < 30), o vamos al muerto, o ráfaga de >= 6 cartas, bajarla
+      const needsPointsFor30 = botMeldPoints < 30;
+      const canBurst = cardsPlayedCount >= 6 || botHand.length <= 6;
+      const isEmergency = opponentImminentWin || isDefensiveSurvivalMode || deckCount <= 15;
+      if (needsPointsFor30 || canBurst || isEmergency || botHand.length <= 5) {
         if (tryMeldBotRun(run, botIdx, true)) return true;
       }
     }
@@ -2868,7 +2962,33 @@ function performOneBotMeldActionInRoom(room, botIdx) {
 
   // Secuencias usando comodín (ordenadas por puntaje descendente)
   const dirtyCandidates = findDirtyRunsCandidates(botHand);
+  const totalWildcardsInHand = botHand.filter(c => c.rank === '2' || c.rank === 'Joker').length;
   for (const candidate of dirtyCandidates) {
+    // CONSERVACIÓN ESTRATÉGICA DE COMODINES:
+    // Evitar quemar comodines en carreras sucias de 3 cartas si solo tenemos 1 comodín en mano,
+    // a menos que:
+    // 1. Tengamos 2 o más comodines en mano (hay excedente).
+    // 2. Nos permita alcanzar los 30 puntos para desbloquear un pozo valioso (>= 3 cartas o con comodines).
+    // 3. Nos lleve al muerto (directo o indirecto) o cierre de partida.
+    // 4. Modo defensivo o mazo bajo (<= 12 cartas).
+    const candidatePoints = candidate.cards.reduce((sum, c) => sum + (CARD_VALUES[c.rank] || 0), 0);
+    const reaches30 = (botMeldPoints < 30) && (botMeldPoints + candidatePoints >= 30);
+    const pozoIsValuable = gameState.discardPile.length >= 3 || gameState.discardPile.some(c => c.rank === '2' || c.rank === 'Joker');
+
+    const allowDirtyRun = 
+      totalWildcardsInHand >= 2 ||
+      (reaches30 && pozoIsValuable) ||
+      canTakeMortoThisTurn ||
+      isCloseToMorto ||
+      canWinThisTurn ||
+      isDefensiveSurvivalMode ||
+      opponentImminentWin ||
+      deckCount <= 12;
+
+    if (!allowDirtyRun) {
+      continue;
+    }
+
     if (tryMeldBotRun(candidate.cards, botIdx, true)) return true;
   }
 
@@ -2933,7 +3053,23 @@ function performOneBotMeldActionInRoom(room, botIdx) {
       if (tryMeldBotRun(groupCards, botIdx, true)) return true;
     } else if (groupCards.length === 2 && freshWildcards.length > 0) {
       const candidate = [...groupCards, freshWildcards[0]];
-      if (tryMeldBotRun(candidate, botIdx, true)) return true;
+      const candPoints = candidate.reduce((sum, c) => sum + (CARD_VALUES[c.rank] || 0), 0);
+      const reaches30 = (botMeldPoints < 30) && (botMeldPoints + candPoints >= 30);
+      const pozoIsValuable = gameState.discardPile.length >= 3 || gameState.discardPile.some(c => c.rank === '2' || c.rank === 'Joker');
+
+      const allowDirtyGroup = 
+        freshWildcards.length >= 2 ||
+        (reaches30 && pozoIsValuable) ||
+        canTakeMortoThisTurn ||
+        isCloseToMorto ||
+        canWinThisTurn ||
+        isDefensiveSurvivalMode ||
+        opponentImminentWin ||
+        deckCount <= 12;
+
+      if (allowDirtyGroup) {
+        if (tryMeldBotRun(candidate, botIdx, true)) return true;
+      }
     }
   }
 
@@ -2994,6 +3130,9 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
 
   const nextOpponentKnownCards = (mem.knownOpponentHands && mem.knownOpponentHands[nextPlayerIdx]) ? mem.knownOpponentHands[nextPlayerIdx] : [];
   const opponentPlayer = gameState.players[opponentTeamIdx];
+  const oppDiscards = Array.isArray(mem.discardHistory)
+    ? mem.discardHistory.filter(d => d.playerIdx === opponentTeamIdx || (gameState.is4Player && (d.playerIdx === nextPlayerIdx || d.playerIdx === (nextPlayerIdx + 2) % 4)))
+    : [];
 
   const opponentHandSize = opponentPlayer?.hand?.length || 0;
   const opponentMelds = opponentPlayer?.melds || [];
@@ -3019,13 +3158,14 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       continue;
     }
 
-    // EVALUACIÓN DE PELIGRO CONTRA LA MANO CONOCIDA Y MESA DEL RIVAL
+    // EVALUACIÓN DE PELIGRO CONTRA LA MANO CONOCIDA, DESCARTES PREVIOS Y MESA DEL RIVAL
     const danger = evaluateDiscardDangerAgainstOpponent(
       card,
       nextOpponentKnownCards,
       opponentMelds,
       tracker,
-      opponentHandSize
+      opponentHandSize,
+      oppDiscards
     );
 
     let score = 0;
@@ -3038,10 +3178,10 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       // EN JUEGO NORMAL:
       let botRetention = 0;
 
-      // Duplicados en mano propia (muy conveniente descartar si está repetida en mano)
+      // Duplicados en mano propia: solo incentivar descarte si no es una carta de alto peligro
       const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
-      if (duplicates > 0) {
-        botRetention -= 120;
+      if (duplicates > 0 && danger.dangerScore <= 5000) {
+        botRetention -= 60;
       }
 
       // Conexiones en mano propia
@@ -3126,11 +3266,14 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       const oppCleanCount = oppMelds.filter(m => m.length >= 7 && !m.some(c => c && c.isUsedAsWildcard)).length;
       const oppDirtyCount = oppMelds.filter(m => m.length >= 7 && m.some(c => c && c.isUsedAsWildcard)).length;
 
+      const oppHandCount = opponentPlayer?.hand?.length || 0;
+      const oppEstimatedHandPenalty = oppHandCount * 12 + (!opponentHasMorto ? 100 : 0);
       const myEstTotal = myMeldPoints + myCleanCount * 200 + myDirtyCount * 100 + 100;
-      const oppEstTotal = oppMeldPoints + oppCleanCount * 200 + oppDirtyCount * 100;
+      const oppEstTotal = Math.max(0, oppMeldPoints + oppCleanCount * 200 + oppDirtyCount * 100 - oppEstimatedHandPenalty);
       const netDiff = myEstTotal - oppEstTotal;
 
-      if (netDiff < 0 && deckCount > 8) {
+      // Solo postergar si la diferencia estimada es rotundamente perjudicial (menos de -150) y aún queda mucho mazo (> 15 cartas)
+      if (netDiff < -150 && deckCount > 15) {
         shouldWin = false;
       }
     }
@@ -3277,7 +3420,7 @@ function tryMeldBotRunInRoom(room, cardsToMeld, botIdx, hasMelded) {
   const newCanastraCreated = result.cards.length >= 7 ? 1 : 0;
   const totalCanastrasAfter = canastrasCount + newCanastraCreated;
   const canBat = hasTakenMorto && (totalCanastrasAfter >= requiredCanastras);
-  const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 2);
+  const minCardsHand = !hasTakenMorto ? 0 : (canBat ? 0 : 1);
 
   if (botHand.length - cardsToMeld.length < minCardsHand) {
     return false; // Evitar bajar si nos deja con menos cartas de las permitidas
@@ -3300,13 +3443,29 @@ function tryMeldBotRunInRoom(room, cardsToMeld, botIdx, hasMelded) {
     return true;
   }
   return false;
-
 }
 
-server.listen(PORT, () => {
-  console.log('-----------------------------------------------------');
-  console.log('Servidor de Buraco Multi-Sala ejecutándose en:');
-  console.log(`- Local: http://localhost:${PORT}`);
-  console.log(`- Red Local: http://${LOCAL_IP}:${PORT}`);
-  console.log('-----------------------------------------------------');
-});
+if (process.env.NODE_ENV !== 'test') {
+  server.listen(PORT, () => {
+    console.log('-----------------------------------------------------');
+    console.log('Servidor de Buraco Multi-Sala ejecutándose en:');
+    console.log(`- Local: http://localhost:${PORT}`);
+    console.log(`- Red Local: http://${LOCAL_IP}:${PORT}`);
+    console.log('-----------------------------------------------------');
+  });
+}
+
+module.exports = {
+  server,
+  io,
+  evaluateDiscardDangerAgainstOpponent,
+  evaluatePilePotential,
+  simulateBotMelding,
+  performOneBotMeldActionInRoom,
+  runBotDiscardPhaseInRoom,
+  tryMeldBotRunInRoom,
+  runBotTurnInRoom,
+  canWildcardFormNewMeldInHand,
+  getConnectionsCount,
+  validateMeld
+};
