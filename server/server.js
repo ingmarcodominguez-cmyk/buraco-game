@@ -2178,13 +2178,14 @@ function runBotTurnInRoom(room, botIdx) {
         // =========================================================================
         // La IA analiza que el rival está lejos de cortar. Si la carta superior sirve
         // para acoplar a sus juegos (ej. K de trébol) o hay comodines, ¡LEVANTAR!
+        const pileSize = gameState.discardPile.length;
         const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
 
         // 1. Si hay algún comodín en el pozo (2 o Joker) o la superior es comodín: ¡SIEMPRE LEVANTAR!
         if (pileEval.hasWildcard || isWildcard) {
           drewFromDiscard = true;
         }
-        // 2. Si la carta superior sirve de inmediato (acople o nueva combinación):
+        // 2. Si la carta superior sirve de inmediato (acopla a juego existente o forma nueva combinación de 3+):
         else if (topCardServes) {
           if (!opponentCanWinSoon || unplayableAdded <= 4) {
             drewFromDiscard = true;
@@ -2194,26 +2195,24 @@ function runBotTurnInRoom(room, botIdx) {
         else if (cardsGainedFromPile >= 3) {
           drewFromDiscard = true;
         }
-        // 4. Si la carta superior conecta con la mano (camino a corrida o trío):
-        else if (pileEval.topConn > 0) {
-          if (!opponentCanWinSoon || unplayableAdded <= 3) {
+        // =========================================================================
+        // REGLA FUNDAMENTAL DE POZOS PEQUEÑOS (1 o 2 cartas):
+        // NUNCA levantar un pozo de 1 o 2 cartas por simples "conexiones sueltas" si no se puede
+        // bajar de inmediato ni contiene comodines. Robar del mazo es infinitamente superior
+        // (oculta información, busca comodines y no traba la mano con basura del rival).
+        // =========================================================================
+        else if (pileSize <= 2) {
+          // No cumple comodín ni bajada inmediata: NO levantar, robar del mazo
+          drewFromDiscard = false;
+        }
+        // 4. Pozos medianos (3 a 4 cartas): Solo si tienen múltiples cartas útiles y alta sinergia
+        else if (pileSize >= 3 && pileSize <= 4) {
+          if (pileEval.usefulCards >= 2 && pileEval.connectionScore >= 3 && unplayableAdded <= 2 && !opponentCanWinSoon) {
             drewFromDiscard = true;
           }
         }
-        // 5. Si el pozo contiene cartas útiles que conectan con la mano:
-        else if (pileEval.usefulCards >= 1 && pileEval.connectionScore >= 2) {
-          if (!opponentCanWinSoon || unplayableAdded <= 3) {
-            drewFromDiscard = true;
-          }
-        }
-        // 6. Si el pozo tiene 3 o más cartas y al menos 2 cartas con potencial/conexión:
-        else if (gameState.discardPile.length >= 3 && pileEval.usefulCards >= 2) {
-          if (!opponentCanWinSoon) {
-            drewFromDiscard = true;
-          }
-        }
-        // 7. Volumen táctico: pozos grandes (>= 5 cartas) que enriquecen la mano para canastas múltiples
-        else if (gameState.discardPile.length >= 5 && unplayableAdded <= 6 && !opponentCanWinSoon) {
+        // 5. Pozos grandes (>= 5 cartas): Volumen táctico que multiplica combinaciones y canastas
+        else if (pileSize >= 5 && unplayableAdded <= 6 && !opponentCanWinSoon) {
           drewFromDiscard = true;
         }
       }
@@ -2222,6 +2221,10 @@ function runBotTurnInRoom(room, botIdx) {
 
   if (drewFromDiscard) {
     const count = gameState.discardPile.length;
+    const pickedCardIds = new Set(gameState.discardPile.map(c => c.id));
+    if (room) room.lastPickedDiscardCardIds = pickedCardIds;
+    gameState.lastPickedDiscardCardIds = pickedCardIds;
+
     botHand.push(...gameState.discardPile);
     gameState.discardPile = [];
     gameState.turnState = 'play';
@@ -2232,6 +2235,8 @@ function runBotTurnInRoom(room, botIdx) {
       gameState.firstDrawnCardId = null;
     }
   } else {
+    if (room) room.lastPickedDiscardCardIds = null;
+    gameState.lastPickedDiscardCardIds = null;
     if (gameState.drawPile.length > 0) {
       const card = gameState.drawPile.pop();
       botHand.push(card);
@@ -3168,15 +3173,25 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       oppDiscards
     );
 
+    // COHERENCIA TÁCTICA: NUNCA descartar en el mismo turno una carta recién levantada del pozo
+    const lastPickedSet = (room && room.lastPickedDiscardCardIds) || (gameState && gameState.lastPickedDiscardCardIds);
+    let justPickedPenalty = 0;
+    if (lastPickedSet && lastPickedSet.has(card.id)) {
+      const nonPickedCards = botHand.filter(c => !lastPickedSet.has(c.id));
+      if (nonPickedCards.length > 0) {
+        justPickedPenalty = 50000;
+      }
+    }
+
     let score = 0;
 
     if (isDefensiveSurvivalMode || opponentImminentWin) {
       // EN MODO SUPERVIVENCIA DEFENSIVA / INMINENTE CIERRE RIVAL:
       // Entre las cartas seguras, descartar la de mayor puntaje para minimizar penalización en mano
-      score = -CARD_VALUES[card.rank] + danger.dangerScore;
+      score = -CARD_VALUES[card.rank] + danger.dangerScore + justPickedPenalty;
     } else {
       // EN JUEGO NORMAL:
-      let botRetention = 0;
+      let botRetention = justPickedPenalty;
 
       // Duplicados en mano propia: solo incentivar descarte si no es una carta de alto peligro
       const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
@@ -3285,6 +3300,8 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
 
   // Batida final (cierre con descarte): Solo si le queda 1 carta, tiene muerto, tiene las canastas requeridas Y decide ganar
   if (botHand.length === 1 && hasTakenMorto && canastrasCount >= requiredCanastras && shouldWin) {
+    if (room) room.lastPickedDiscardCardIds = null;
+    gameState.lastPickedDiscardCardIds = null;
     botHand.splice(discardIdx, 1);
     recordDiscardCard(room, botIdx, cardToDiscard);
     gameState.discardPile.push(cardToDiscard);
@@ -3302,6 +3319,8 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
   }
 
   // EN TODOS LOS DEMÁS CASOS: DESCARTAR OBLIGATORIAMENTE AL POZO
+  if (room) room.lastPickedDiscardCardIds = null;
+  gameState.lastPickedDiscardCardIds = null;
   botHand.splice(discardIdx, 1);
   recordDiscardCard(room, botIdx, cardToDiscard);
   gameState.discardPile.push(cardToDiscard);

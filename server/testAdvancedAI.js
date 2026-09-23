@@ -305,6 +305,92 @@ function runAITests() {
   }
   console.log("✅ Prueba 6.B aprobada: La IA descartó obligatoriamente al pozo (el pozo nunca queda sin descarte).");
 
+  // PRUEBA 7: Pozo pequeño (<= 2 cartas) sin comodines ni bajada inmediata
+  // La IA NO debe levantarlo aunque tenga una carta conectora suelta en mano (ej. 3 de pique con 4 de pique)
+  console.log("\n--- Prueba 7: Pozo pequeño (1-2 cartas) sin comodines ni bajada inmediata ---");
+  const roomSmallPozo = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [{ suit: 'H', rank: '7' }], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'S', rank: '4', id: 'bot_4s' },
+            { suit: 'D', rank: '8', id: 'bot_8d' },
+            { suit: 'H', rank: 'A', id: 'bot_ah' }
+          ], 
+          melds: [
+            // Tiene más de 30 puntos en mesa (30 pts)
+            [{ suit: 'S', rank: '10', id: 'm1' }, { suit: 'S', rank: 'J', id: 'm2' }, { suit: 'S', rank: 'Q', id: 'm3' }]
+          ]
+        }
+      ],
+      mortosTaken: [false, false],
+      // Pozo de 2 cartas: Q de trébol y 3 de pique (como en el caso reportado por el usuario)
+      discardPile: [
+        { suit: 'C', rank: 'Q', id: 'pile_qc' },
+        { suit: 'S', rank: '3', id: 'pile_3s' }
+      ],
+      drawPile: [{ suit: 'H', rank: '5', id: 'deck_5h' }],
+      turnState: 'draw',
+      lastAction: ''
+    }
+  };
+
+  runBotTurnInRoom(roomSmallPozo, 1);
+  if (roomSmallPozo.gameState.discardPile.length === 0) {
+    console.error("❌ Falló Prueba 7: La IA levantó un pozo de 2 cartas sin comodines y sin bajada inmediata!");
+    process.exit(1);
+  }
+  if (!roomSmallPozo.gameState.players[1].hand.some(c => c.id === 'deck_5h')) {
+    console.error("❌ Falló Prueba 7: La IA no robó del mazo!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 7 aprobada: La IA NO levanta pozos de 1-2 cartas por simples conexiones sueltas; roba del mazo.");
+
+  // PRUEBA 8: Coherencia de descarte (Nunca tirar de vuelta una carta recién levantada del pozo)
+  console.log("\n--- Prueba 8: Coherencia de descarte tras levantar pozo ---");
+  const roomCoherence = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [{ suit: 'H', rank: '7' }], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'D', rank: '9', id: 'hand_9d' },
+            { suit: 'C', rank: '8', id: 'hand_8c' },
+            { suit: 'S', rank: '3', id: 'picked_3s' } // Carta que vino del pozo
+          ], 
+          melds: []
+        }
+      ],
+      mortosTaken: [false, false],
+      discardPile: [],
+      drawPile: [{ suit: 'H', rank: '5', id: 'deck_card' }],
+      turnState: 'discard',
+      lastAction: ''
+    },
+    lastPickedDiscardCardIds: new Set(['picked_3s'])
+  };
+
+  runBotDiscardPhaseInRoom(roomCoherence, 1);
+  const discardedCard = roomCoherence.gameState.discardPile[roomCoherence.gameState.discardPile.length - 1];
+  if (discardedCard.id === 'picked_3s') {
+    console.error("❌ Falló Prueba 8: La IA descartó la misma carta que recién levantó del pozo!");
+    process.exit(1);
+  }
+  console.log(`✅ Prueba 8 aprobada: La IA conservó la carta levantada del pozo (${discardedCard.rank} de ${discardedCard.suit} fue descartada en su lugar).`);
+
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
 }
