@@ -657,6 +657,57 @@ function runAITests() {
   }
   console.log("✅ Prueba 12 aprobada: La IA protege sus 5s para las escaleras de tréboles y piques y no baja el trío.");
 
+  // PRUEBA 13: Acople del 2 natural a canasta con Joker para Morto Directo
+  console.log("\n--- Prueba 13: Acople del 2 natural de la pinta a canasta con Joker para ir al Muerto ---");
+  const roomMortoNatural2 = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'S', rank: '2', id: '2s' } // Única carta en mano: 2 de Piques (natural)
+          ], 
+          melds: [
+            // Canasta o escalera de piques con Joker: 3♠, Joker, 5♠, 6♠, 7♠, 4♠
+            [
+              { suit: 'S', rank: '3', id: 's3' },
+              { suit: 'Joker', rank: 'Joker', id: 'jk', isUsedAsWildcard: true },
+              { suit: 'S', rank: '5', id: 's5' },
+              { suit: 'S', rank: '6', id: 's6' },
+              { suit: 'S', rank: '7', id: 's7' },
+              { suit: 'S', rank: '4', id: 's4' }
+            ]
+          ]
+        }
+      ],
+      mortosTaken: [false, false],
+      mortos: [
+        [{ suit: 'H', rank: 'A' }, { suit: 'H', rank: 'K' }],
+        [{ suit: 'D', rank: 'A' }, { suit: 'D', rank: 'K' }]
+      ],
+      discardPile: [],
+      drawPile: new Array(30).fill({ suit: 'H', rank: 'A' }),
+      requiredCanastras: 1
+    }
+  };
+
+  const didMeldNatural2 = performOneBotMeldActionInRoom(roomMortoNatural2, 1);
+  if (!didMeldNatural2) {
+    console.error("❌ Falló Prueba 13: La IA NO acopló el 2 de Piques a la canasta de piques con Joker!");
+    process.exit(1);
+  }
+  if (roomMortoNatural2.gameState.players[1].hand.length !== 2) { // 2 cartas del muerto tomado
+    console.error(`❌ Falló Prueba 13: La IA debería haber vaciado su mano y tomado el muerto (esperadas 2 cartas del muerto, encontradas ${roomMortoNatural2.gameState.players[1].hand.length})`);
+    process.exit(1);
+  }
+  console.log("✅ Prueba 13 aprobada: La IA acopló el 2 de Piques natural a la canasta con Joker y tomó el Muerto Directo.");
+
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
 }

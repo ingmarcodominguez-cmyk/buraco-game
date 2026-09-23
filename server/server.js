@@ -2174,50 +2174,36 @@ function runBotTurnInRoom(room, botIdx) {
         }
       } else {
         // =========================================================================
-        // SI EL RIVAL NO TIENE MUERTO, O TIENE MUERTO PERO ESTÁ LEJOS DE CERRAR (0 CANASTAS):
+        // IA AGRESIVA Y ACUMULADORA DE CANASTAS FUTURAS:
         // =========================================================================
-        // La IA analiza que el rival está lejos de cortar. Si la carta superior sirve
-        // para acoplar a sus juegos (ej. K de trébol) o hay comodines, ¡LEVANTAR!
         const pileSize = gameState.discardPile.length;
         const pileEval = evaluatePilePotential(gameState.discardPile, botHand, tracker);
 
-        // 1. Si hay algún comodín en el pozo (2 o Joker) o la superior es comodín: ¡SIEMPRE LEVANTAR!
+        // 1. Comodín en el pozo (2 o Joker) o carta superior es comodín: ¡SIEMPRE LEVANTAR!
         if (pileEval.hasWildcard || isWildcard) {
           drewFromDiscard = true;
         }
-        // 2. Si la carta superior sirve de inmediato (acopla a juego existente o forma nueva combinación de 3+):
+        // 2. Carta superior sirve de inmediato (acopla a juego existente o forma nuevo juego):
         else if (topCardServes) {
-          if (!opponentCanWinSoon || unplayableAdded <= 4) {
-            drewFromDiscard = true;
-          }
-        }
-        // 3. Si al recoger el pozo puede bajar al menos un juego de inmediato (3+ cartas):
-        else if (cardsGainedFromPile >= 3) {
           drewFromDiscard = true;
         }
-        // =========================================================================
-        // REGLA FUNDAMENTAL DE POZOS PEQUEÑOS (1 o 2 cartas):
-        // NUNCA levantar un pozo de 1 o 2 cartas por simples "conexiones sueltas" si no se puede
-        // bajar de inmediato ni contiene comodines. Robar del mazo es infinitamente superior
-        // (oculta información, busca comodines y no traba la mano con basura del rival).
-        // =========================================================================
+        // 3. Pozos de 1 o 2 cartas: levantar solo si forma par directo del mismo número
         else if (pileSize <= 2) {
-          // No cumple comodín ni bajada inmediata: NO levantar, robar del mazo
-          drewFromDiscard = false;
-        }
-        // 4. Pozos medianos (3 a 4 cartas): Solo si tienen múltiples cartas útiles y alta sinergia
-        else if (pileSize >= 3 && pileSize <= 4) {
-          if (pileEval.usefulCards >= 2 && pileEval.connectionScore >= 3 && unplayableAdded <= 2 && !opponentCanWinSoon) {
+          const topSameRank = topDiscard ? botHand.some(c => c.rank === topDiscard.rank && c.rank !== '2' && c.rank !== 'Joker') : false;
+          if (topSameRank) {
             drewFromDiscard = true;
           }
         }
-        // 5. Pozos grandes (>= 5 cartas): Volumen táctico que multiplica combinaciones y canastas
-        else if (pileSize >= 5 && unplayableAdded <= 6 && !opponentCanWinSoon) {
+        // 4. Pozos acumulados de 3 o más cartas: JUNTAR AGRESIVAMENTE A FUTURO
+        //    Si en el pozo hay cartas útiles a futuro, conexiones o volumen (3+ cartas): ¡LEVANTAR EL POZO!
+        else if (pileSize >= 3 && !opponentCanWinSoon) {
           drewFromDiscard = true;
         }
       }
     }
   }
+
+  let didRejectFirstCard = false;
 
   if (drewFromDiscard) {
     const count = gameState.discardPile.length;
@@ -2257,6 +2243,7 @@ function runBotTurnInRoom(room, botIdx) {
           gameState.isFirstTurn = false;
           gameState.firstDrawnCardId = null;
           gameState.lastAction = `${botPlayer.name} descartó la primera carta (${rejected.rank} de ${rejected.suit}) al pozo porque no le servía y robó otra del mazo.`;
+          didRejectFirstCard = true;
         } else {
           gameState.isFirstTurn = false;
           gameState.firstDrawnCardId = null;
@@ -2296,7 +2283,17 @@ function runBotTurnInRoom(room, botIdx) {
         setTimeout(executeBotMeldStep, 1200);
       } else {
         setTimeout(() => {
-          runBotDiscardPhase(botIdx);
+          if (didRejectFirstCard) {
+            // La primera carta rechazada al inicio de la mano ya fue colocada en el pozo.
+            // Esa carta fue el descarte del turno, por lo que pasa el turno sin descartar 2 veces.
+            checkMortoIndirectInRoom(room, botIdx);
+            const nextTurn = gameState.is4Player ? (botIdx + 1) % 4 : (botIdx === 0 ? 1 : 0);
+            room.isBotThinking = false;
+            startPlayerTurnInRoom(room, nextTurn);
+            sendStateToAll();
+          } else {
+            runBotDiscardPhase(botIdx);
+          }
         }, 1200);
       }
     }
@@ -2913,9 +2910,9 @@ function performOneBotMeldActionInRoom(room, botIdx) {
       if (isWildcard) {
         if (isCurrentCleanCanastra) continue;
         if (currentMeld.some(c => c && c.isUsedAsWildcard)) {
-          const runSuit = currentMeld.find(rc => rc.rank !== 'Joker' && rc.rank !== '2')?.suit;
-          const hasSuitTwo = currentMeld.some(c => c && c.rank === '2' && c.suit === runSuit);
-          if (!hasSuitTwo) continue;
+          const runSuit = currentMeld.find(rc => rc.rank !== 'Joker' && (rc.rank !== '2' || rc.isUsedAsWildcard === false))?.suit;
+          const isNaturalTwo = card.rank === '2' && card.suit === runSuit;
+          if (!isNaturalTwo) continue;
         }
 
         // PROTECCIÓN DE CANASTA LIMPIA EN CURSO (4, 5 o 6 cartas naturales):
