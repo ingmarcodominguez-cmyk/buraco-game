@@ -2951,17 +2951,9 @@ function performOneBotMeldActionInRoom(room, botIdx) {
     if (run.length >= 10) {
       const canastaCards = run.slice(run.length - 7);
       if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
-    } else if (run.length >= 4) {
+    } else if (run.length >= 3) {
+      // Bajar toda secuencia limpia de 3 o más cartas (suma puntos limpios y descarga la mano)
       if (tryMeldBotRun(run, botIdx, true)) return true;
-    } else if (run.length === 3) {
-      // Secuencia limpia de 3 cartas:
-      // Si necesitamos puntos para llegar a 30 (botMeldPoints < 30), o vamos al muerto, o ráfaga de >= 6 cartas, bajarla
-      const needsPointsFor30 = botMeldPoints < 30;
-      const canBurst = cardsPlayedCount >= 6 || botHand.length <= 6;
-      const isEmergency = opponentImminentWin || isDefensiveSurvivalMode || deckCount <= 15;
-      if (needsPointsFor30 || canBurst || isEmergency || botHand.length <= 5) {
-        if (tryMeldBotRun(run, botIdx, true)) return true;
-      }
     }
   }
 
@@ -3193,21 +3185,22 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
       // EN JUEGO NORMAL:
       let botRetention = justPickedPenalty;
 
-      // Duplicados en mano propia: solo incentivar descarte si no es una carta de alto peligro
-      const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
-      if (duplicates > 0 && danger.dangerScore <= 5000) {
-        botRetention -= 60;
+      // 1. Si la carta forma parte de un juego completo e independiente en mano (secuencia 3+ o trío):
+      // ¡RETENCIÓN MÁXIMA! Jamás romper ni descartar un juego completo que ya tenemos en mano
+      if (canNaturalCardFormIndependentMeldInHand(card, botHand)) {
+        botRetention += 250000;
       }
 
-      // Conexiones en mano propia
-      const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
-      botRetention += sameSuitCount * 8;
-      botRetention += (CARD_VALUES[card.rank] || 5);
-      
-      const connects = getConnectionsCount(card, botHand);
-      botRetention += connects * 100;
+      // 2. Si la carta acopla directamente a un juego ya bajado en mesa:
+      let servesDirectAppend = false;
+      botMelds.forEach(m => {
+        if (validateMeld([...m, card]).valid) servesDirectAppend = true;
+      });
+      if (servesDirectAppend) {
+        botRetention += 250000;
+      }
 
-      // Conexión directa con juegos propios en la mesa:
+      // 3. Conexión directa con los extremos de secuencias propias en mesa (a 1 o 2 de distancia):
       let connectsToMyMelds = 0;
       botMelds.forEach(m => {
         if (m.length > 0 && m[0].suit === card.suit) {
@@ -3222,17 +3215,32 @@ function runBotDiscardPhaseInRoom(room, botIdx) {
           }
         }
       });
-      botRetention += connectsToMyMelds * 150;
+      botRetention += connectsToMyMelds * 50000;
 
-      // CÁLCULO PROBABILÍSTICO DE RECUPERACIÓN DESDE EL MAZO:
-      const probRecovery = tracker.probInDrawPile(card.suit, card.rank);
-      if (probRecovery >= 0.45) {
-        // Alta probabilidad de que otra copia esté en el mazo: se puede arriesgar más si es necesario
-        botRetention -= 50;
-      } else if (tracker.getRemainingCount(card.suit, card.rank) === 0) {
-        // Irrecuperable: no queda ninguna otra copia en todo el mazo ni muertos
-        botRetention += 90;
+      // 4. Conexiones en mano propia (vecinos directos, parejas y conectores con hueco):
+      const connDetail = getCardHandConnections(card, botHand);
+      botRetention += connDetail.directNeighbor * 130000;
+      botRetention += connDetail.sameRank * 130000;
+      botRetention += connDetail.gapConnector * 85000;
+
+      // 5. Duplicados exactos en mano:
+      const duplicates = botHand.filter(c => c.rank === card.rank && c.suit === card.suit && c.id !== card.id).length;
+      if (duplicates > 0) {
+        botRetention -= 70000;
       }
+
+      // 6. Carta irrecuperable (última copia en todo el juego/mazo):
+      if (tracker && tracker.getRemainingCount(card.suit, card.rank) === 0) {
+        if (connDetail.total > 0 || connectsToMyMelds > 0) {
+          // Si nos sirve para un juego o conecta con nuestra mano, ¡es insustituible!
+          botRetention += 40000;
+        }
+      }
+
+      // 7. Densidad de palo y valor facial
+      const sameSuitCount = botHand.filter(c => c.suit === card.suit).length;
+      botRetention += sameSuitCount * 100;
+      botRetention += (CARD_VALUES[card.rank] || 5);
 
       // REGLA DE BLOQUEO DEL MUERTO EN 4 JUGADORES:
       if (nextPlayerBlocked) {
@@ -3371,6 +3379,44 @@ function getConnectionsCount(card, hand) {
   return connects;
 }
 
+// HELPER: Conexiones detalladas en la mano (vecino directo distancia 1, conector con hueco distancia 2, y misma categoría)
+function getCardHandConnections(card, hand) {
+  if (!card || card.rank === 'Joker' || card.rank === '2') {
+    return { directNeighbor: 0, gapConnector: 0, sameRank: 0, total: 0 };
+  }
+
+  let directNeighbor = 0;
+  let gapConnector = 0;
+  let sameRank = 0;
+
+  const cardSlots = (card.rank === 'A') ? [1, 14] : [BOT_RANK_ORDER[card.rank] || 0];
+
+  hand.forEach(c => {
+    if (c.id !== card.id && c.rank !== 'Joker' && c.rank !== '2') {
+      if (c.rank === card.rank) {
+        sameRank++;
+      }
+      if (c.suit === card.suit) {
+        const otherSlots = (c.rank === 'A') ? [1, 14] : [BOT_RANK_ORDER[c.rank] || 0];
+        let minDist = 999;
+        for (const s1 of cardSlots) {
+          for (const s2 of otherSlots) {
+            const d = Math.abs(s1 - s2);
+            if (d < minDist) minDist = d;
+          }
+        }
+        if (minDist === 1) {
+          directNeighbor++;
+        } else if (minDist === 2) {
+          gapConnector++;
+        }
+      }
+    }
+  });
+
+  return { directNeighbor, gapConnector, sameRank, total: directNeighbor + gapConnector + sameRank };
+}
+
 // HELPER: Evalúa el potencial del pozo y conexiones con la mano de la IA
 function evaluatePilePotential(pile, hand, tracker) {
   let usefulCards = 0;
@@ -3475,6 +3521,8 @@ module.exports = {
   tryMeldBotRunInRoom,
   runBotTurnInRoom,
   canWildcardFormNewMeldInHand,
+  canNaturalCardFormIndependentMeldInHand,
   getConnectionsCount,
+  getCardHandConnections,
   validateMeld
 };

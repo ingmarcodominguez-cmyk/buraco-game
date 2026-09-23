@@ -391,6 +391,111 @@ function runAITests() {
   }
   console.log(`✅ Prueba 8 aprobada: La IA conservó la carta levantada del pozo (${discardedCard.rank} de ${discardedCard.suit} fue descartada en su lugar).`);
 
+  // PRUEBA 9: Bajada de corrida limpia de 3 cartas (4-5-6 de pique) teniendo ya 30 puntos en mesa
+  console.log("\n--- Prueba 9: Bajada de corrida limpia de 3 cartas (4-5-6 de pique) ---");
+  const roomClean3 = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'S', rank: '4', id: 's4' },
+            { suit: 'S', rank: '5', id: 's5' },
+            { suit: 'S', rank: '6', id: 's6' },
+            { suit: 'D', rank: '3', id: 'd3' },
+            { suit: 'D', rank: '10', id: 'd10' },
+            { suit: 'H', rank: '6', id: 'h6' },
+            { suit: 'H', rank: '10', id: 'h10' },
+            { suit: 'H', rank: 'J', id: 'hj' }
+          ], 
+          melds: [
+            // Ya tiene 30 puntos en mesa (Trío de Reinas)
+            [{ suit: 'S', rank: 'Q' }, { suit: 'C', rank: 'Q' }, { suit: 'H', rank: 'Q' }]
+          ]
+        }
+      ],
+      mortosTaken: [false, false],
+      discardPile: [{ suit: 'S', rank: '5', id: 'pozo_5s' }],
+      drawPile: new Array(50).fill({ suit: 'C', rank: '2' }),
+      turnState: 'play',
+      lastAction: ''
+    }
+  };
+
+  const meldSuccess = performOneBotMeldActionInRoom(roomClean3, 1);
+  if (!meldSuccess) {
+    console.error("❌ Falló Prueba 9: La IA no bajó la corrida limpia de 3 cartas (4-5-6 de pique)!");
+    process.exit(1);
+  }
+  const has456Meld = roomClean3.gameState.players[1].melds.some(m => 
+    m.length === 3 && m.some(c => c.rank === '4') && m.some(c => c.rank === '5') && m.some(c => c.rank === '6')
+  );
+  if (!has456Meld) {
+    console.error("❌ Falló Prueba 9: No se encontró la corrida 4-5-6 en los juegos bajados de la IA!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 9 aprobada: La IA bajó exitosamente la corrida limpia 4-5-6 de pique a la mesa.");
+
+  // PRUEBA 10: Protección contra el descarte de conectores frente a cartas basura aisladas
+  // Aunque el rival haya tirado 5 de pique antes (carta fría con dangerScore negativo),
+  // la IA que tiene 4 de pique y 6 de pique en mano NUNCA debe descartar el 5 de pique
+  // si tiene cartas basura aisladas (ej. 3 de diamante o 10 de diamante sin compañeros).
+  console.log("\n--- Prueba 10: Protección de conector clave frente a cartas basura aisladas ---");
+  const roomDiscardSafety = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'S', rank: '4', id: 'hand_4s' },
+            { suit: 'S', rank: '5', id: 'hand_5s' }, // Conecta 4 y 6
+            { suit: 'S', rank: '6', id: 'hand_6s' },
+            { suit: 'D', rank: '3', id: 'trash_3d' }, // Basura aislada total
+            { suit: 'D', rank: '10', id: 'trash_10d' } // Basura aislada total
+          ], 
+          melds: [
+            [{ suit: 'S', rank: 'Q' }, { suit: 'C', rank: 'Q' }, { suit: 'H', rank: 'Q' }]
+          ]
+        }
+      ],
+      mortosTaken: [false, false],
+      discardPile: [],
+      drawPile: new Array(50).fill({ suit: 'C', rank: '2' }),
+      turnState: 'discard',
+      lastAction: '',
+      aiMemory: {
+        discardHistory: [
+          // El rival ya tiró 5 de pique (haciéndola parecer "fría / segura")
+          { suit: 'S', rank: '5', playerIdx: 0 }
+        ]
+      }
+    }
+  };
+
+  runBotDiscardPhaseInRoom(roomDiscardSafety, 1);
+  const thrownCard = roomDiscardSafety.gameState.discardPile[roomDiscardSafety.gameState.discardPile.length - 1];
+  if (thrownCard.rank === '5' && thrownCard.suit === 'S') {
+    console.error("❌ Falló Prueba 10: La IA descartó el 5 de pique rompiendo su juego!");
+    process.exit(1);
+  }
+  if (thrownCard.suit === 'S') {
+    console.error(`❌ Falló Prueba 10: La IA descartó una carta de pique (${thrownCard.rank} de ${thrownCard.suit}) en lugar de la basura aislada!`);
+    process.exit(1);
+  }
+  console.log(`✅ Prueba 10 aprobada: La IA descartó la carta basura (${thrownCard.rank} de ${thrownCard.suit}) y preservó intacto su juego de piques.`);
+
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
 }
