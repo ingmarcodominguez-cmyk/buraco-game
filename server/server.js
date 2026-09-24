@@ -2368,6 +2368,87 @@ function isCardCommittedToSuitRun(card, hand, melds = []) {
   return false;
 }
 
+// HELPER: Obtiene el rango numérico [min, max] (slots 1..14) que abarca una secuencia
+function getSequenceSpan(cards) {
+  if (!cards || cards.length === 0) return { min: 0, max: 0 };
+  const v = validateMeld(cards);
+  if (v.valid && v.type === 'sequence') {
+    const firstCard = v.cards[0];
+    const lastCard = v.cards[v.cards.length - 1];
+    let min = BOT_RANK_ORDER[firstCard.representedRank || firstCard.rank] || 0;
+    let max = BOT_RANK_ORDER[lastCard.representedRank || lastCard.rank] || 0;
+    if (lastCard.rank === 'A' || lastCard.representedRank === 'A') {
+      max = 14;
+    }
+    return { min, max };
+  }
+  const vals = cards.map(c => {
+    const r = c.representedRank || c.rank;
+    return BOT_RANK_ORDER[r] || 0;
+  }).filter(Boolean);
+  if (vals.length === 0) return { min: 0, max: 0 };
+  return { min: Math.min(...vals), max: Math.max(...vals) };
+}
+
+// HELPER: Determina si una secuencia candidata (limpia o sucia) debe retenerse en mano
+// en lugar de bajarse como un juego separado, debido a que el equipo ya tiene una corrida
+// del mismo palo en mesa que aún no es canasta (< 7 cartas).
+// En Buraco, bajar un segundo juego del mismo palo cuando el primero no es canasta
+// CORTA la canasta definitivamente (dos juegos en mesa nunca se pueden fusionar),
+// duplicando la dificultad de batir y destruyendo canastas inminentes (ej. mesa con 4-8♦ y mano con 10-Q♦).
+function shouldHoldRunForExistingTableRun(candidateCards, botMelds, isEmergency = false) {
+  if (isEmergency) return false;
+  if (!candidateCards || candidateCards.length === 0) return false;
+  if (!botMelds || botMelds.length === 0) return false;
+
+  const candNat = candidateCards.find(c => c.rank !== 'Joker' && (c.rank !== '2' || c.isUsedAsWildcard === false));
+  const candSuit = candNat ? candNat.suit : candidateCards[0].suit;
+  if (!candSuit || candSuit === 'Joker') return false;
+
+  const sameSuitMelds = botMelds.filter(m => {
+    if (!m || m.length === 0) return false;
+    const nat = m.find(c => c.rank !== 'Joker' && (c.rank !== '2' || c.isUsedAsWildcard === false));
+    return nat && nat.suit === candSuit;
+  });
+
+  if (sameSuitMelds.length === 0) return false;
+
+  const candSpan = getSequenceSpan(candidateCards);
+  if (!candSpan.min || !candSpan.max) return false;
+
+  for (const tableMeld of sameSuitMelds) {
+    // Si la corrida en mesa YA es una Canasta completa (>= 7 cartas), no bloquea
+    if (tableMeld.length >= 7) continue;
+
+    const tableSpan = getSequenceSpan(tableMeld);
+    if (!tableSpan.min || !tableSpan.max) continue;
+
+    let gap = 0;
+    if (candSpan.min > tableSpan.max) {
+      gap = candSpan.min - tableSpan.max;
+    } else if (candSpan.max < tableSpan.min) {
+      gap = tableSpan.min - candSpan.max;
+    } else {
+      gap = 0; // Solapamiento
+    }
+
+    // 1. Proximidad de conexión:
+    // Si gap <= 4 (ej. mesa termina en 8 y mano empieza en 10, gap = 2, falta solo el 9),
+    // ¡RETENER EN MANO! Están a solo 1 a 3 cartas de formar una Canasta unificada.
+    if (gap <= 4) {
+      return true;
+    }
+
+    // 2. Si la corrida en mesa ya está avanzada (>= 4 cartas), concentrar el palo en esa corrida
+    // y no dispersar recursos en una segunda corrida del mismo palo:
+    if (tableMeld.length >= 4) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 // HELPER: Mapea las cartas de un palo en la mano a sus slots posibles (1..14)
 function getSuitCardSlots(hand, suit) {
   const slots = [];
@@ -2684,8 +2765,11 @@ function simulateBotMelding(hand, existingMelds) {
   // 2. Simular nuevas secuencias limpias (reconociendo As alto y 2 natural)
   const suits = ['H', 'D', 'C', 'S'];
   for (let suit of suits) {
-    const { foundRuns, remainingHand } = extractCleanRunsForSuit(tempHand, suit);
+    const { foundRuns } = extractCleanRunsForSuit(tempHand, suit);
     foundRuns.forEach(run => {
+      if (shouldHoldRunForExistingTableRun(run, tempMelds, false)) {
+        return;
+      }
       if (run.length >= 10) {
         const canastaPart = run.slice(run.length - 7);
         const remainderPart = run.slice(0, run.length - 7);
@@ -2695,21 +2779,28 @@ function simulateBotMelding(hand, existingMelds) {
           tempMelds.push(resC.cards);
           tempMelds.push(resR.cards);
           cardsPlayed += run.length;
+          run.forEach(rc => {
+            const idx = tempHand.findIndex(c => c.id === rc.id);
+            if (idx !== -1) tempHand.splice(idx, 1);
+          });
         }
       } else if (run.length >= 3) {
         const result = validateMeld(run);
         if (result.valid) {
           tempMelds.push(result.cards);
           cardsPlayed += run.length;
+          run.forEach(rc => {
+            const idx = tempHand.findIndex(c => c.id === rc.id);
+            if (idx !== -1) tempHand.splice(idx, 1);
+          });
         }
       }
     });
-    tempHand = remainingHand;
   }
 
   // 3. Simular nuevas secuencias sucias usando comodines (priorizadas por puntos)
   while (true) {
-    const dirtyCands = findDirtyRunsCandidates(tempHand);
+    const dirtyCands = findDirtyRunsCandidates(tempHand).filter(c => !shouldHoldRunForExistingTableRun(c.cards, tempMelds, false));
     if (dirtyCands.length === 0) break;
     const best = dirtyCands[0];
     tempMelds.push(best.validated);
@@ -2885,6 +2976,9 @@ function performOneBotMeldActionInRoom(room, botIdx) {
   const canTakeMortoThisTurn = !botHasMorto && (botHand.length - cardsPlayedCount <= 1);
   const isCloseToMorto = !botHasMorto && botHand.length <= 4;
 
+  const isRivalClosing = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 6;
+  const isEmergency = isRivalClosing || canTakeMortoThisTurn || isCloseToMorto || canWinThisTurn || opponentImminentWin || isDefensiveSurvivalMode || deckCount <= 8;
+
   // 1. Intentar realizar exactamente UN acople
   for (let mIdx = 0; mIdx < botMelds.length; mIdx++) {
     const currentMeld = botMelds[mIdx];
@@ -3014,6 +3108,9 @@ function performOneBotMeldActionInRoom(room, botIdx) {
 
   for (const item of allCleanRuns) {
     const run = item.run;
+    if (shouldHoldRunForExistingTableRun(run, botMelds, isEmergency)) {
+      continue;
+    }
     if (run.length >= 10) {
       const canastaCards = run.slice(run.length - 7);
       if (tryMeldBotRun(canastaCards, botIdx, true)) return true;
@@ -3027,6 +3124,9 @@ function performOneBotMeldActionInRoom(room, botIdx) {
   const dirtyCandidates = findDirtyRunsCandidates(botHand);
   const totalWildcardsInHand = botHand.filter(c => c.rank === '2' || c.rank === 'Joker').length;
   for (const candidate of dirtyCandidates) {
+    if (shouldHoldRunForExistingTableRun(candidate.cards, botMelds, isEmergency)) {
+      continue;
+    }
     // CONSERVACIÓN ESTRATÉGICA DE COMODINES:
     // Evitar quemar comodines en carreras sucias de 3 cartas si solo tenemos 1 comodín en mano,
     // a menos que:
@@ -3066,13 +3166,6 @@ function performOneBotMeldActionInRoom(room, botIdx) {
   const freshWildcards = botHand.filter(c => c.rank === '2' || c.rank === 'Joker');
   for (const rank of Object.keys(rankGroups)) {
     let groupCards = rankGroups[rank];
-
-    // MODO VACIADO DEFENSIVO DE MANO:
-    // Si el rival ya tiene canasta y pocas cartas (<= 6), el peligro de corte es inminente.
-    // En esta situación de emergencia, ¡DESCARGA TOTAL! No se retiene nada: se bajan todos los grupos posibles
-    // para sumar puntos en mesa y evitar penalizaciones de decenas o cientos de puntos en mano.
-    const isRivalClosing = opponentHasMorto && opponentHasCanasta && opponentHandSize <= 6;
-    const isEmergency = isRivalClosing || canTakeMortoThisTurn || isCloseToMorto || canWinThisTurn;
 
     if (!isEmergency) {
       // PROTECCIÓN DE ESCALERAS / CORRIDAS:
@@ -3577,6 +3670,7 @@ module.exports = {
   canNaturalCardFormIndependentMeldInHand,
   isCardUsefulForFirstTurn,
   isCardCommittedToSuitRun,
+  shouldHoldRunForExistingTableRun,
   getConnectionsCount,
   getCardHandConnections,
   validateMeld

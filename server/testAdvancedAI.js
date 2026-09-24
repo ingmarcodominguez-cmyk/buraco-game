@@ -11,6 +11,7 @@ const {
   runBotTurnInRoom,
   isCardUsefulForFirstTurn,
   isCardCommittedToSuitRun,
+  shouldHoldRunForExistingTableRun,
   validateMeld
 } = require('./server');
 
@@ -707,6 +708,106 @@ function runAITests() {
     process.exit(1);
   }
   console.log("✅ Prueba 13 aprobada: La IA acopló el 2 de Piques natural a la canasta con Joker y tomó el Muerto Directo.");
+
+  // PRUEBA 14: Protección contra división de palo (No cortar canasta bajando segunda corrida del mismo palo)
+  // Caso real del usuario: Mesa tiene [4♦, 5♦, 6♦, Joker (7♦), 8♦] (5 cartas, falta 9♦ para canasta).
+  // Mano tiene [10♦, J♦, Q♦].
+  // La IA DEBE retener [10♦, J♦, Q♦] en mano esperando el 9♦ para meter un canastón de 9 cartas,
+  // y NO bajarla por separado cortando definitivamente la canasta.
+  console.log("\n--- Prueba 14: Protección contra división de palo (caso 4♦-8♦ en mesa y 10♦-J♦-Q♦ en mano) ---");
+  const roomCanastaSeverance = {
+    players: [],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      players: [
+        { id: 'player1', name: 'Humano', hand: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10], melds: [] },
+        { 
+          id: 'bot', 
+          name: 'Bot', 
+          isBot: true, 
+          hand: [
+            { suit: 'D', rank: '10', id: 'd10' },
+            { suit: 'D', rank: 'J', id: 'dj' },
+            { suit: 'D', rank: 'Q', id: 'dq' },
+            { suit: 'S', rank: 'K', id: 'sk' },
+            { suit: 'H', rank: '3', id: 'h3' }
+          ], 
+          melds: [
+            // Corrida de tréboles
+            [
+              { suit: 'C', rank: '4', id: 'c4' },
+              { suit: 'C', rank: '2', id: 'c2', isUsedAsWildcard: true, representedRank: '5' },
+              { suit: 'C', rank: '6', id: 'c6' },
+              { suit: 'C', rank: '7', id: 'c7' },
+              { suit: 'C', rank: '8', id: 'c8' }
+            ],
+            // Corrida de diamantes a falta de 9♦ para canasta
+            [
+              { suit: 'D', rank: '4', id: 'd4' },
+              { suit: 'D', rank: '5', id: 'd5' },
+              { suit: 'D', rank: '6', id: 'd6' },
+              { suit: 'Joker', rank: 'Joker', id: 'jk', isUsedAsWildcard: true, representedRank: '7' },
+              { suit: 'D', rank: '8', id: 'd8' }
+            ]
+          ]
+        }
+      ],
+      mortosTaken: [false, false],
+      mortos: [
+        [{ suit: 'H', rank: 'A' }, { suit: 'H', rank: 'K' }],
+        [{ suit: 'D', rank: 'A' }, { suit: 'D', rank: 'K' }]
+      ],
+      discardPile: [{ suit: 'S', rank: '3' }],
+      drawPile: new Array(30).fill({ suit: 'H', rank: 'A' }),
+      requiredCanastras: 1
+    }
+  };
+
+  const botMeldsInitial = roomCanastaSeverance.gameState.players[1].melds;
+  const candidateDiamondRun = [
+    { suit: 'D', rank: '10', id: 'd10' },
+    { suit: 'D', rank: 'J', id: 'dj' },
+    { suit: 'D', rank: 'Q', id: 'dq' }
+  ];
+
+  // 14.A: Verificar que shouldHoldRunForExistingTableRun detecta la corrida como retenida
+  if (!shouldHoldRunForExistingTableRun(candidateDiamondRun, botMeldsInitial, false)) {
+    console.error("❌ Falló Prueba 14.A: shouldHoldRunForExistingTableRun debería retener 10-J-Q de diamante por presencia de 4-8 de diamante en mesa!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 14.A aprobada: shouldHoldRunForExistingTableRun identifica correctamente que se debe retener en mano.");
+
+  // 14.B: Ejecutar la fase de bajada del bot: NO debe bajar 10♦-J♦-Q♦ por separado
+  const didLowerSeparateMeld = performOneBotMeldActionInRoom(roomCanastaSeverance, 1);
+  if (didLowerSeparateMeld) {
+    console.error("❌ Falló Prueba 14.B: La IA bajó 10♦-J♦-Q♦ como juego separado cortando la canasta de diamantes!");
+    process.exit(1);
+  }
+  if (roomCanastaSeverance.gameState.players[1].melds.length !== 2) {
+    console.error("❌ Falló Prueba 14.B: Se esperaba que los melds continuaran siendo 2, pero hay " + roomCanastaSeverance.gameState.players[1].melds.length);
+    process.exit(1);
+  }
+  console.log("✅ Prueba 14.B aprobada: La IA NO bajó 10♦-J♦-Q♦ por separado; esperó en mano.");
+
+  // 14.C: Simular que el bot consigue el 9♦ (por robo o pozo). Al llegar el 9♦, acopla 9, 10, J, Q a la mesa logrando un Canastón
+  roomCanastaSeverance.gameState.players[1].hand.push({ suit: 'D', rank: '9', id: 'd9' });
+  
+  // Paso 1: Acopla 9♦
+  performOneBotMeldActionInRoom(roomCanastaSeverance, 1);
+  // Paso 2: Acopla 10♦
+  performOneBotMeldActionInRoom(roomCanastaSeverance, 1);
+  // Paso 3: Acopla J♦
+  performOneBotMeldActionInRoom(roomCanastaSeverance, 1);
+  // Paso 4: Acopla Q♦
+  performOneBotMeldActionInRoom(roomCanastaSeverance, 1);
+
+  const diamondMeldAfter = roomCanastaSeverance.gameState.players[1].melds[1];
+  if (diamondMeldAfter.length !== 9) {
+    console.error(`❌ Falló Prueba 14.C: Se esperaba una canasta de 9 cartas, pero tiene ${diamondMeldAfter.length} cartas!`);
+    process.exit(1);
+  }
+  console.log("✅ Prueba 14.C aprobada: Al conseguir el 9♦, la IA acopló exitosamente toda la secuencia formando un Canastón de 9 cartas!");
 
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
