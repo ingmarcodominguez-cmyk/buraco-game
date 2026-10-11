@@ -46,6 +46,23 @@ export default function App() {
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [showSimulateConfirm, setShowSimulateConfirm] = useState(false);
   const [showExitGameConfirm, setShowExitGameConfirm] = useState(false);
+  const [showTargetScoreModal, setShowTargetScoreModal] = useState(false);
+  const [targetScoreInput, setTargetScoreInput] = useState(3000);
+
+  const handleOpenTargetScoreModal = () => {
+    setTargetScoreInput(gameState?.targetScore || 3000);
+    setShowTargetScoreModal(true);
+  };
+
+  const handleSaveTargetScore = (newScore) => {
+    const scoreVal = parseInt(newScore, 10);
+    if (!isNaN(scoreVal) && scoreVal >= 100 && scoreVal <= 50000) {
+      socket.emit('change-target-score', { newTargetScore: scoreVal });
+      setShowTargetScoreModal(false);
+    } else {
+      alert("Por favor ingresa un número válido entre 100 y 50000.");
+    }
+  };
 
   const handleRoomChange = (newRoomId) => {
     setCurrentRoomId(newRoomId);
@@ -363,6 +380,26 @@ export default function App() {
                 <span style={{ fontSize: '0.85rem', color: '#cbd5e1', alignSelf: 'center', marginRight: '10px' }}>
                   Notebook: <span style={{ color: '#10b981', fontWeight: 600 }}>{playerName}</span> (Jugador {playerIndex + 1})
                 </span>
+                {gameState && (
+                  <button 
+                    className="btn-header" 
+                    onClick={handleOpenTargetScoreModal}
+                    style={{ 
+                      display: 'flex', 
+                      alignItems: 'center', 
+                      gap: '5px', 
+                      background: 'rgba(251, 191, 36, 0.15)', 
+                      border: '1px solid rgba(251, 191, 36, 0.4)', 
+                      color: '#fbbf24', 
+                      fontWeight: 600, 
+                      marginRight: '8px',
+                      cursor: 'pointer'
+                    }}
+                    title="Hacé clic para cambiar la meta de puntos de la partida"
+                  >
+                    🎯 Meta: {gameState.targetScore || 3000} pts ✏️
+                  </button>
+                )}
                 {/* Simular corte: SOLO visible si el modo desarrollador está autorizado con la clave lom@lind@ */}
                 {isDevAuthorized && gameState && gameState.status === 'playing' && (
                   <button 
@@ -738,6 +775,133 @@ export default function App() {
         </div>
       )}
 
+      {/* MODAL: Cambiar Meta de Puntos (Accesible en todo momento sin window.prompt) */}
+      {showTargetScoreModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0, 0, 0, 0.75)',
+          backdropFilter: 'blur(6px)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10001
+        }}>
+          <div className="glass-panel" style={{
+            width: '90%',
+            maxWidth: '460px',
+            padding: '24px',
+            borderRadius: '16px',
+            background: 'rgba(15, 23, 42, 0.95)',
+            border: '1px solid rgba(251, 191, 36, 0.4)',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.6)',
+            textAlign: 'center'
+          }}>
+            <div style={{ fontSize: '2.2rem', marginBottom: '8px' }}>🎯</div>
+            <h2 style={{ fontSize: '1.25rem', fontWeight: 700, color: '#f8fafc', marginBottom: '8px' }}>
+              Cambiar Meta de Puntos
+            </h2>
+            <p style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '16px', lineHeight: 1.4 }}>
+              Ajustá el puntaje requerido para ganar la partida. Se actualiza en tiempo real para todos los jugadores.
+            </p>
+
+            {/* Botones de selección rápida */}
+            <div style={{ marginBottom: '16px' }}>
+              <div style={{ fontSize: '0.75rem', color: '#cbd5e1', marginBottom: '8px', fontWeight: 600 }}>
+                Metas habituales:
+              </div>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
+                {[1500, 2000, 2500, 3000, 3500, 4000, 5000].map(val => (
+                  <button
+                    key={val}
+                    type="button"
+                    onClick={() => setTargetScoreInput(val)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      fontSize: '0.85rem',
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                      border: Number(targetScoreInput) === val ? '1px solid #fbbf24' : '1px solid rgba(255,255,255,0.15)',
+                      background: Number(targetScoreInput) === val ? 'rgba(251, 191, 36, 0.25)' : 'rgba(255,255,255,0.06)',
+                      color: Number(targetScoreInput) === val ? '#fbbf24' : '#e2e8f0',
+                      transition: 'all 0.15s ease'
+                    }}
+                  >
+                    {val} pts
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Input numérico */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontSize: '0.8rem', color: '#94a3b8', marginBottom: '6px' }}>
+                O ingresá el puntaje deseado:
+              </label>
+              <input
+                type="number"
+                min={100}
+                max={50000}
+                step={100}
+                value={targetScoreInput}
+                onChange={(e) => setTargetScoreInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') handleSaveTargetScore(targetScoreInput); }}
+                style={{
+                  width: '100%',
+                  maxWidth: '220px',
+                  padding: '10px 14px',
+                  borderRadius: '8px',
+                  background: 'rgba(30, 41, 59, 0.9)',
+                  border: '1px solid rgba(251, 191, 36, 0.4)',
+                  color: '#fff',
+                  fontSize: '1.2rem',
+                  fontWeight: 700,
+                  textAlign: 'center',
+                  outline: 'none',
+                  boxSizing: 'border-box'
+                }}
+              />
+            </div>
+
+            {/* Botones de acción */}
+            <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+              <button
+                type="button"
+                onClick={() => setShowTargetScoreModal(false)}
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: '8px',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  color: '#cbd5e1',
+                  fontWeight: 600,
+                  cursor: 'pointer'
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => handleSaveTargetScore(targetScoreInput)}
+                style={{
+                  padding: '10px 22px',
+                  borderRadius: '8px',
+                  background: 'linear-gradient(135deg, #f59e0b, #d97706)',
+                  border: 'none',
+                  color: '#0f172a',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)'
+                }}
+              >
+                Guardar Meta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Contenido principal: Lobby o Tablero */}
       {!gameState ? (
         <Lobby 
@@ -759,6 +923,7 @@ export default function App() {
           onAction={handleGameAction}
           isDevAuthorized={isDevAuthorized}
           onToggleDevAuth={handleToggleDevAuth}
+          onChangeTargetScore={handleOpenTargetScoreModal}
         />
       )}
     </div>

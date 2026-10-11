@@ -25,7 +25,7 @@ const getTeamOwnerIndex = (idx, is4Player) => {
   return idx === 0 || idx === 2 ? 0 : 1;
 };
 
-export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, isDevAuthorized, onToggleDevAuth }) {
+export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, isDevAuthorized, onToggleDevAuth, onChangeTargetScore }) {
   const [prevGameState, setPrevGameState] = useState(null);
   const [animatingDiscard, setAnimatingDiscard] = useState(null);
   const [newlyAddedCardIds, setNewlyAddedCardIds] = useState(new Set());
@@ -513,7 +513,10 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
   };
 
   const handleEditTargetScore = () => {
-    if (gameState.status === 'finished') return;
+    if (onChangeTargetScore) {
+      onChangeTargetScore();
+      return;
+    }
     const newScoreStr = window.prompt(
       "Modificar meta de puntos de la partida:", 
       gameState.targetScore || 3000
@@ -1480,7 +1483,7 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                 El ganador es <strong>{is4P ? (gameState.winner === 0 || gameState.winner === 2 ? `${gameState.players[0].name} & ${gameState.players[2].name}` : `${gameState.players[1].name} & ${gameState.players[3].name}`) : (gameState.players?.[gameState.winner]?.name || 'Desconocido')}</strong> con <strong>{gameState.scores?.[gameState.winner] || 0}</strong> puntos.
               </p>
               
-              <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '12px', padding: '16px', marginBottom: '24px' }}>
+              <div style={{ background: 'rgba(0,0,0,0.3)', borderRadius: '12px', padding: '16px', marginBottom: '16px' }}>
                 <h3 style={{ fontSize: '0.85rem', color: '#94a3b8', marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>Puntajes Finales</h3>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '20px', fontSize: '1.2rem', fontWeight: 'bold' }}>
                   <div style={{ color: '#10b981' }}>
@@ -1496,6 +1499,29 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                     {gameState.scores?.[1] || 0} pts
                   </div>
                 </div>
+              </div>
+
+              <div style={{ marginBottom: '20px' }}>
+                <button
+                  type="button"
+                  onClick={handleEditTargetScore}
+                  style={{
+                    background: 'rgba(251, 191, 36, 0.15)',
+                    border: '1px solid rgba(251, 191, 36, 0.5)',
+                    color: '#fbbf24',
+                    borderRadius: '8px',
+                    padding: '8px 14px',
+                    fontSize: '0.85rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px'
+                  }}
+                  title="Aumentar la meta para continuar la partida"
+                >
+                  🎯 Meta: {gameState.targetScore || 3000} pts ✏️ (Cambiar meta para seguir jugando)
+                </button>
               </div>
 
               {gameState.roundHistory && gameState.roundHistory.length > 0 && (
@@ -1546,7 +1572,29 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
             </div>
           ) : (
             <div className="modal-content glass-panel" style={{ maxWidth: '640px', padding: '24px' }}>
-              <h2 className="modal-title" style={{ fontSize: '1.8rem', marginBottom: '4px' }}>Anotación de la Ronda</h2>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+                <h2 className="modal-title" style={{ fontSize: '1.8rem', margin: 0 }}>Anotación de la Ronda</h2>
+                <button
+                  type="button"
+                  onClick={handleEditTargetScore}
+                  style={{
+                    background: 'rgba(251, 191, 36, 0.15)',
+                    border: '1px solid rgba(251, 191, 36, 0.4)',
+                    color: '#fbbf24',
+                    borderRadius: '6px',
+                    padding: '4px 10px',
+                    fontSize: '0.8rem',
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                  title="Cambiar la meta de puntos de la partida"
+                >
+                  🎯 Meta: {gameState.targetScore || 3000} pts ✏️
+                </button>
+              </div>
               <p style={{ color: '#94a3b8', fontSize: '0.85rem', marginBottom: '16px' }}>
                 Verificá y editá los puntos de la ronda antes de anotarla en la planilla.
               </p>

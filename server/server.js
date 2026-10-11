@@ -769,7 +769,11 @@ io.on('connection', (socket) => {
       room.requiredCanastrasSetting = requiredCanastras === 2 ? 2 : 1;
     }
     if (targetScore) {
-      room.targetScoreSetting = Number(targetScore) || 3000;
+      const parsedTarget = Number(targetScore) || 3000;
+      room.targetScoreSetting = parsedTarget;
+      if (room.gameState) {
+        room.gameState.targetScore = parsedTarget;
+      }
     }
     if (is4Player !== undefined) {
       room.is4PlayerSetting = !!is4Player;
@@ -1427,10 +1431,22 @@ io.on('connection', (socket) => {
     const room = findRoomBySocketId(socket.id);
     if (!room || !room.gameState) return;
     const scoreVal = parseInt(newTargetScore, 10);
-    if ([2000, 3000, 5000].includes(scoreVal)) {
+    if (!isNaN(scoreVal) && scoreVal >= 100 && scoreVal <= 50000) {
       room.gameState.targetScore = scoreVal;
       room.targetScoreSetting = scoreVal;
-      room.gameState.lastAction = `Puntos para ganar ajustados a ${scoreVal} pts.`;
+
+      // Si la partida estaba en match-over pero con la nueva meta ningún equipo alcanza aún la meta:
+      if (room.gameState.turnState === 'match-over' && 
+          room.globalScores[0] < scoreVal && 
+          room.globalScores[1] < scoreVal) {
+        room.gameState.status = 'finished';
+        room.gameState.turnState = 'confirm-scores';
+        room.gameState.winner = null;
+      }
+
+      saveRoomsToDisk();
+      room.gameState.lastAction = `Meta de puntos para ganar ajustada a ${scoreVal} pts.`;
+      console.log(`[Sala ${room.id}] Meta de puntos cambiada a ${scoreVal} pts.`);
       sendStateToRoom(room);
     }
   });

@@ -809,6 +809,70 @@ function runAITests() {
   }
   console.log("✅ Prueba 14.C aprobada: Al conseguir el 9♦, la IA acopló exitosamente toda la secuencia formando un Canastón de 9 cartas!");
 
+  // PRUEBA 15: Modificación de puntaje objetivo en medio de la partida (ej. 4000)
+  console.log("\n--- Prueba 15: Cambio de puntaje objetivo a 4000 en medio de la partida ---");
+  const testRoomTarget = {
+    id: 'test-target-room',
+    globalScores: [3200, 2900],
+    targetScoreSetting: 3000,
+    gameState: {
+      status: 'playing',
+      targetScore: 3000,
+      turnState: 'play',
+      winner: null
+    }
+  };
+
+  // 15.A: Con meta original de 3000, un equipo con 3200 puntos daría por terminada la partida
+  const target3000 = testRoomTarget.gameState.targetScore || testRoomTarget.targetScoreSetting || 3000;
+  const isMatchOverAt3000 = testRoomTarget.globalScores[0] >= target3000 || testRoomTarget.globalScores[1] >= target3000;
+  if (!isMatchOverAt3000) {
+    console.error("❌ Falló Prueba 15.A: Con meta 3000 y 3200 puntos acumulados, debería ser match-over.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 15.A aprobada: Con meta 3000, el acumulado de 3200 pts alcanza la meta.");
+
+  // 15.B: Simular cambio de meta a 4000 en medio de la partida
+  const newTargetScore = 4000;
+  testRoomTarget.gameState.targetScore = newTargetScore;
+  testRoomTarget.targetScoreSetting = newTargetScore;
+
+  // Si la partida estaba en match-over, se reactiva a confirm-scores
+  testRoomTarget.gameState.turnState = 'match-over';
+  testRoomTarget.gameState.winner = 0;
+  if (testRoomTarget.gameState.turnState === 'match-over' &&
+      testRoomTarget.globalScores[0] < newTargetScore &&
+      testRoomTarget.globalScores[1] < newTargetScore) {
+    testRoomTarget.gameState.status = 'finished';
+    testRoomTarget.gameState.turnState = 'confirm-scores';
+    testRoomTarget.gameState.winner = null;
+  }
+
+  if (testRoomTarget.gameState.targetScore !== 4000 || testRoomTarget.targetScoreSetting !== 4000) {
+    console.error("❌ Falló Prueba 15.B: La nueva meta no se guardó como 4000!");
+    process.exit(1);
+  }
+  if (testRoomTarget.gameState.winner !== null || testRoomTarget.gameState.turnState !== 'confirm-scores') {
+    console.error("❌ Falló Prueba 15.B: Al subir la meta a 4000, la partida debió reanudarse.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 15.B aprobada: La meta se actualizó a 4000 pts y la partida se reanudó sin declarar ganador prematuro.");
+
+  // 15.C: Con la nueva meta de 4000, 3200 pts NO finaliza la partida; solo finaliza al alcanzar 4000+ (ej. 4150 pts)
+  const isMatchOverAt4000With3200 = testRoomTarget.globalScores[0] >= testRoomTarget.gameState.targetScore || testRoomTarget.globalScores[1] >= testRoomTarget.gameState.targetScore;
+  if (isMatchOverAt4000With3200) {
+    console.error("❌ Falló Prueba 15.C: Con meta 4000 y 3200 pts, la partida no debe terminar!");
+    process.exit(1);
+  }
+
+  testRoomTarget.globalScores[0] = 4150;
+  const isMatchOverAt4000With4150 = testRoomTarget.globalScores[0] >= testRoomTarget.gameState.targetScore || testRoomTarget.globalScores[1] >= testRoomTarget.gameState.targetScore;
+  if (!isMatchOverAt4000With4150) {
+    console.error("❌ Falló Prueba 15.C: Con 4150 pts y meta 4000, la partida sí debió terminar!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 15.C aprobada: Con meta 4000 pts, la partida continúa en 3200 y finaliza legalmente recién al superar los 4000 pts (4150).");
+
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
 }

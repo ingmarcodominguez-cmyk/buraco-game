@@ -106,21 +106,26 @@ export default function Scoreboard({ gameState, playerIndex, onChangeTargetScore
           <Award size={18} style={{ color: '#fbbf24' }} />
           <h2 className="sidebar-title" style={{ margin: 0 }}>Puntuación</h2>
         </div>
-        <span 
+        <button 
+          type="button"
           onClick={onChangeTargetScore}
           style={{ 
             fontSize: '0.75rem', 
             color: '#fbbf24', 
-            background: 'rgba(251,191,36,0.1)', 
-            padding: '2px 8px', 
+            background: 'rgba(251,191,36,0.15)', 
+            padding: '3px 10px', 
             borderRadius: '12px', 
-            border: '1px solid rgba(251,191,36,0.2)',
-            cursor: onChangeTargetScore ? 'pointer' : 'default'
+            border: '1px solid rgba(251,191,36,0.3)',
+            cursor: onChangeTargetScore ? 'pointer' : 'default',
+            fontWeight: 600,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '4px'
           }}
-          title={onChangeTargetScore ? "Hacé click para cambiar la meta de puntos" : ""}
+          title={onChangeTargetScore ? "Hacé clic para cambiar la meta de puntos de la partida" : ""}
         >
-          Meta: {gameState.targetScore || 3000} pts ✏️
-        </span>
+          🎯 Meta: {gameState.targetScore || 3000} pts ✏️
+        </button>
       </div>
 
       <table className="score-table">
