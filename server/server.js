@@ -149,6 +149,7 @@ class BuracoRoom {
     this.targetScoreSetting = 3000;
     this.isAgainstBotSetting = false;
     this.is4PlayerSetting = false;
+    this.botModeSetting = '2h2b'; // '2h2b' (2 humanos + 2 bots) o '1h3b' (1 humano + 3 bots)
     this.cleanupTimeout = null;
     this.isBotThinking = false;
     this.botTurnTimeout = null;
@@ -179,6 +180,7 @@ function saveRoomsToDisk() {
           targetScoreSetting: room.targetScoreSetting,
           isAgainstBotSetting: room.isAgainstBotSetting,
           is4PlayerSetting: room.is4PlayerSetting,
+          botModeSetting: room.botModeSetting,
           aiMemory: room.aiMemory
         };
       }
@@ -204,6 +206,7 @@ function loadRoomsFromDisk() {
         room.targetScoreSetting = item.targetScoreSetting || 3000;
         room.isAgainstBotSetting = !!item.isAgainstBotSetting;
         room.is4PlayerSetting = !!item.is4PlayerSetting;
+        room.botModeSetting = item.botModeSetting || '2h2b';
         room.aiMemory = item.aiMemory || { knownOpponentHands: {}, discardHistory: [], botHeldHistory: [] };
         rooms.set(id, room);
         console.log(`Sala restaurada desde disco: ${id} (${room.players.map(p => p.name).join(', ')})`);
@@ -604,20 +607,42 @@ function checkAndTriggerBotTurnInRoom(room) {
   }
 }
 
+function getRoomRequiredHumans(r) {
+  if (!r) return 2;
+  if (r.isAgainstBotSetting) {
+    if (r.is4PlayerSetting) {
+      return (r.botModeSetting === '1h3b') ? 1 : 2;
+    }
+    return 1;
+  }
+  return r.is4PlayerSetting ? 4 : 2;
+}
+
 function getRoomsSummary() {
   const defaultList = ['mesa-1', 'mesa-2', 'mesa-3', 'mesa-4'];
   const summary = {};
   defaultList.forEach(id => {
     const r = rooms.get(id);
     if (!r) {
-      summary[id] = { isOccupied: false, playersCount: 0, players: [] };
+      summary[id] = { isOccupied: false, isWaiting: false, playersCount: 0, requiredHumans: 2, players: [] };
     } else {
       const activeHumans = r.players.filter(p => p.socketId && !p.isBot);
       const isGamePlaying = !!(r.gameState && (r.gameState.status === 'playing' || r.gameState.status === 'finished-visual'));
-      const isBotBusy = r.isAgainstBotSetting && activeHumans.length >= 1;
-      const isFull = activeHumans.length >= (r.is4PlayerSetting ? 4 : 2);
-      const isOccupied = activeHumans.length > 0 && (isGamePlaying || isBotBusy || isFull);
-      summary[id] = { isOccupied, playersCount: activeHumans.length, players: activeHumans.map(p => p.name) };
+      const requiredHumans = getRoomRequiredHumans(r);
+      const isFull = activeHumans.length >= requiredHumans;
+      const isOccupied = (activeHumans.length > 0 && isGamePlaying) || isFull;
+      const isWaiting = !isOccupied && activeHumans.length > 0 && !isGamePlaying;
+      summary[id] = { 
+        isOccupied, 
+        isWaiting,
+        isGamePlaying,
+        playersCount: activeHumans.length, 
+        requiredHumans,
+        is4Player: r.is4PlayerSetting,
+        isAgainstBot: r.isAgainstBotSetting,
+        botMode: r.botModeSetting || '2h2b',
+        players: activeHumans.map(p => p.name) 
+      };
     }
   });
   return summary;
@@ -644,14 +669,21 @@ io.on('connection', (socket) => {
     const room = rooms.get(cleanId);
     const activeHumans = room ? room.players.filter(p => p.socketId && !p.isBot) : [];
     const isGamePlaying = !!(room && room.gameState && (room.gameState.status === 'playing' || room.gameState.status === 'finished-visual'));
-    const isBotBusy = room ? (room.isAgainstBotSetting && activeHumans.length >= 1) : false;
-    const isFull = room ? (activeHumans.length >= (room.is4PlayerSetting ? 4 : 2)) : false;
-    const isOccupied = activeHumans.length > 0 && (isGamePlaying || isBotBusy || isFull);
+    const requiredHumans = room ? getRoomRequiredHumans(room) : 2;
+    const isFull = room ? (activeHumans.length >= requiredHumans) : false;
+    const isOccupied = (activeHumans.length > 0 && isGamePlaying) || isFull;
+    const isWaiting = !isOccupied && activeHumans.length > 0 && !isGamePlaying;
 
     socket.emit('lobby-update', {
       roomId: cleanId,
       players: activeHumans.map(p => p.name),
-      isOccupied
+      isOccupied,
+      isWaiting,
+      isGamePlaying,
+      requiredHumans,
+      is4Player: room ? room.is4PlayerSetting : false,
+      isAgainstBot: room ? room.isAgainstBotSetting : false,
+      botMode: room ? (room.botModeSetting || '2h2b') : '2h2b'
     });
     socket.emit('rooms-summary', getRoomsSummary());
   });
@@ -662,13 +694,25 @@ io.on('connection', (socket) => {
     const room = rooms.get(cleanId);
     if (room && !room.gameState) {
       room.players = room.players.filter(p => p.socketId !== socket.id);
+      const remainingHumans = room.players.filter(p => !p.isBot);
+      if (remainingHumans.length === 0) {
+        room.players = [];
+        room.gameState = null;
+        room.globalScores = [0, 0];
+        room.isBotThinking = false;
+      }
       saveRoomsToDisk();
       socket.leave(cleanId);
       socket.roomId = null;
       io.to(cleanId).emit('lobby-update', {
         roomId: cleanId,
-        players: room.players.filter(p => !p.isBot).map(p => p.name),
-        isOccupied: false
+        players: remainingHumans.map(p => p.name),
+        isOccupied: false,
+        isWaiting: false,
+        requiredHumans: getRoomRequiredHumans(room),
+        is4Player: room.is4PlayerSetting,
+        isAgainstBot: room.isAgainstBotSetting,
+        botMode: room.botModeSetting || '2h2b'
       });
       io.emit('rooms-summary', getRoomsSummary());
     }
@@ -679,7 +723,7 @@ io.on('connection', (socket) => {
   });
 
   // Unirse al lobby de una sala y configurar partida
-  socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player, roomId }) => {
+  socket.on('join-lobby', ({ name, requiredCanastras, isAgainstBot, targetScore, is4Player, botMode, roomId }) => {
     const cleanRoomId = (roomId || 'mesa-1').trim().toLowerCase();
     const cleanName = (name || '').trim();
     if (!cleanName) return;
@@ -719,24 +763,17 @@ io.on('connection', (socket) => {
       room.isBotThinking = false;
     }
 
-    // Regla de sala ocupada: Solo si hay humanos ACTIVOS conectados y no es el mismo jugador reconectando
+    // Regla de sala ocupada con partida en curso: Solo si hay humanos ACTIVOS jugando y no es reconexión
     if (hasActiveGame && activeHumans.length > 0 && !isPlayerReconnecting) {
       socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible (ej. Mesa 2).`);
       socket.emit('rooms-summary', getRoomsSummary());
       return;
     }
 
-    // Si alguien ya está en esa sala jugando contra la IA:
-    if (room.isAgainstBotSetting && activeHumans.length >= 1 && !isPlayerReconnecting) {
-      socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} ya está ocupada jugando contra la IA. Por favor selecciona otra mesa libre (ej. Mesa 2).`);
-      socket.emit('rooms-summary', getRoomsSummary());
-      return;
-    }
-
-    // Si la mesa de humanos ya completó su cupo máximo de personas activas:
-    const maxCapacity = room.is4PlayerSetting ? 4 : 2;
-    if (activeHumans.length >= maxCapacity && !isPlayerReconnecting) {
-      socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} está llena (${maxCapacity} jugadores activos). Por favor selecciona otra mesa disponible.`);
+    // Regla de cupo de humanos: Permitir hasta requiredHumansForRoom (ej. 2 humanos para 4P con bots)
+    const requiredHumansForRoom = getRoomRequiredHumans(room);
+    if (activeHumans.length >= requiredHumansForRoom && !isPlayerReconnecting) {
+      socket.emit('error-message', `La ${cleanRoomId.toUpperCase()} ya completó su cupo (${requiredHumansForRoom} jugador${requiredHumansForRoom > 1 ? 'es' : ''}). Por favor selecciona otra mesa disponible (ej. Mesa 2).`);
       socket.emit('rooms-summary', getRoomsSummary());
       return;
     }
@@ -744,7 +781,7 @@ io.on('connection', (socket) => {
     socket.roomId = cleanRoomId;
     socket.join(cleanRoomId);
 
-    // Si no hay otros humanos conectados en esta sala, y cambian la configuración, reiniciar sala
+    // Si no hay otros humanos conectados en esta sala, y cambian la configuración, actualizar sala
     const otherActiveHumans = room.players.filter(p => p.socketId && p.socketId !== socket.id && !p.isBot);
     if (otherActiveHumans.length === 0) {
       const is4PVal = is4Player !== undefined ? !!is4Player : room.is4PlayerSetting;
@@ -755,6 +792,13 @@ io.on('connection', (socket) => {
         room.gameState = null;
         room.globalScores = [0, 0];
         room.isBotThinking = false;
+      }
+      room.is4PlayerSetting = is4PVal;
+      room.isAgainstBotSetting = isBotVal;
+      if (botMode !== undefined) {
+        room.botModeSetting = botMode;
+      } else {
+        room.botModeSetting = (is4PVal && isBotVal) ? '2h2b' : '2h2b';
       }
     }
 
@@ -775,63 +819,72 @@ io.on('connection', (socket) => {
         room.gameState.targetScore = parsedTarget;
       }
     }
-    if (is4Player !== undefined) {
-      room.is4PlayerSetting = !!is4Player;
-    }
-    if (isAgainstBot !== undefined) {
-      room.isAgainstBotSetting = !!isAgainstBot;
-    }
 
     const maxPlayers = room.is4PlayerSetting ? 4 : 2;
 
     if (room.isAgainstBotSetting) {
       if (room.is4PlayerSetting) {
-        const existingIndex = room.players.findIndex(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
-        if (existingIndex !== -1) {
-          room.players[existingIndex].socketId = socket.id;
-          room.players[existingIndex].name = cleanName;
-          if (room.gameState && room.gameState.players && room.gameState.players[existingIndex]) {
-            room.gameState.players[existingIndex].name = cleanName;
-          }
-          console.log(`Humano se reconectó a sala 4P ${cleanRoomId}: ${cleanName} (slot ${existingIndex})`);
+        if (room.botModeSetting === '1h3b') {
+          // Solitario 4 jugadores: 1 humano + 3 bots
+          room.players = [
+            { socketId: socket.id, name: cleanName },
+            { socketId: 'bot-socket-1', name: 'Compu Este (IA)', isBot: true },
+            { socketId: 'bot-socket-2', name: 'Compu Compañero (IA)', isBot: true },
+            { socketId: 'bot-socket-3', name: 'Compu Oeste (IA)', isBot: true }
+          ];
+          room.gameState = null;
+          room.globalScores = [0, 0];
+          room.isBotThinking = false;
+          console.log(`Partida 4P Solitario (1H + 3 Bots) iniciada en sala ${cleanRoomId} para ${cleanName}`);
         } else {
-          // Si hay una partida en curso y hay un slot humano desconectado
-          const disconnectedHumanIdx = room.players.findIndex(p => !p.isBot && !p.socketId);
-          if (disconnectedHumanIdx !== -1 && room.gameState) {
-            room.players[disconnectedHumanIdx].socketId = socket.id;
-            room.players[disconnectedHumanIdx].name = cleanName;
-            if (room.gameState.players && room.gameState.players[disconnectedHumanIdx]) {
-              room.gameState.players[disconnectedHumanIdx].name = cleanName;
+          // 2 Humanos + 2 Bots
+          const existingIndex = room.players.findIndex(p => p.name && p.name.trim().toLowerCase() === cleanName.toLowerCase());
+          if (existingIndex !== -1) {
+            room.players[existingIndex].socketId = socket.id;
+            room.players[existingIndex].name = cleanName;
+            if (room.gameState && room.gameState.players && room.gameState.players[existingIndex]) {
+              room.gameState.players[existingIndex].name = cleanName;
             }
-            console.log(`Humano ocupó slot desconectado en sala 4P ${cleanRoomId}: ${cleanName}`);
+            console.log(`Humano se reconectó a sala 4P ${cleanRoomId}: ${cleanName} (slot ${existingIndex})`);
           } else {
-            const humanCount = room.players.filter(p => !p.isBot).length;
-            if (humanCount < 2) {
-              if (!room.gameState) {
-                room.players = room.players.filter(p => !p.isBot);
-                room.players.push({ socketId: socket.id, name: cleanName });
-                console.log(`Humano ${room.players.length} unido a sala 4P ${cleanRoomId}: ${cleanName}`);
+            // Si hay una partida en curso y hay un slot humano desconectado
+            const disconnectedHumanIdx = room.players.findIndex(p => !p.isBot && !p.socketId);
+            if (disconnectedHumanIdx !== -1 && room.gameState) {
+              room.players[disconnectedHumanIdx].socketId = socket.id;
+              room.players[disconnectedHumanIdx].name = cleanName;
+              if (room.gameState.players && room.gameState.players[disconnectedHumanIdx]) {
+                room.gameState.players[disconnectedHumanIdx].name = cleanName;
+              }
+              console.log(`Humano ocupó slot desconectado en sala 4P ${cleanRoomId}: ${cleanName}`);
+            } else {
+              const humanCount = room.players.filter(p => !p.isBot).length;
+              if (humanCount < 2) {
+                if (!room.gameState) {
+                  room.players = room.players.filter(p => !p.isBot);
+                  room.players.push({ socketId: socket.id, name: cleanName });
+                  console.log(`Humano ${room.players.length} unido a sala 4P (2H + 2 Bots) ${cleanRoomId}: ${cleanName}`);
+                } else {
+                  socket.emit('error-message', 'La partida 4P ya está en curso.');
+                  return;
+                }
               } else {
-                socket.emit('error-message', 'La partida 4P ya está en curso.');
+                socket.emit('error-message', 'La partida contra la PC en esta sala está llena (ya hay 2 humanos).');
                 return;
               }
-            } else {
-              socket.emit('error-message', 'La partida contra la PC en esta sala está llena (ya hay 2 humanos).');
-              return;
             }
           }
-        }
-        
-        // Solo configurar bots iniciales si la partida no ha comenzado (evitar alterar sorteo de asientos)
-        if (!room.gameState) {
-          const activeHumans = room.players.filter(p => !p.isBot);
-          if (activeHumans.length === 2) {
-            room.players = [
-              activeHumans[0],
-              activeHumans[1],
-              { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
-              { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
-            ];
+          
+          // Solo configurar bots iniciales si la partida no ha comenzado y ya están los 2 humanos
+          if (!room.gameState) {
+            const activeHumans = room.players.filter(p => !p.isBot);
+            if (activeHumans.length === 2) {
+              room.players = [
+                activeHumans[0],
+                activeHumans[1],
+                { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
+                { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
+              ];
+            }
           }
         }
       } else {
@@ -898,11 +951,22 @@ io.on('connection', (socket) => {
     }
 
     // Emitir lista de jugadores a la sala
-    io.to(cleanRoomId).emit('lobby-update', { roomId: cleanRoomId, players: room.players.map(p => p.name) });
+    const activeHumansCount = room.players.filter(p => !p.isBot).length;
+    const requiredHumans = getRoomRequiredHumans(room);
+
+    io.to(cleanRoomId).emit('lobby-update', { 
+      roomId: cleanRoomId, 
+      players: room.players.filter(p => !p.isBot).map(p => p.name),
+      allPlayers: room.players.map(p => ({ name: p.name, isBot: !!p.isBot })),
+      is4Player: room.is4PlayerSetting,
+      isAgainstBot: room.isAgainstBotSetting,
+      botMode: room.botModeSetting || '2h2b',
+      requiredHumans,
+      maxPlayers
+    });
+    io.emit('rooms-summary', getRoomsSummary());
 
     // Iniciar juego si se completaron los cupos
-    const activeHumansCount = room.players.filter(p => !p.isBot).length;
-    const requiredHumans = (room.isAgainstBotSetting && room.is4PlayerSetting) ? 2 : (room.isAgainstBotSetting ? 1 : maxPlayers);
     const allSocketsReady = room.players.filter(p => !p.isBot).every(p => p.socketId);
 
     if (room.players.length === maxPlayers && activeHumansCount === requiredHumans && allSocketsReady) {
@@ -3689,5 +3753,9 @@ module.exports = {
   shouldHoldRunForExistingTableRun,
   getConnectionsCount,
   getCardHandConnections,
-  validateMeld
+  validateMeld,
+  getRoomRequiredHumans,
+  getRoomsSummary,
+  BuracoRoom,
+  performSorteoInRoom
 };

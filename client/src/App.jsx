@@ -182,6 +182,8 @@ export default function App() {
       if (data && data.roomId) {
         if (data.roomId === currentRoomId) {
           setLobbyPlayers(data.players || []);
+          if (data.is4Player !== undefined) setIs4PlayerSetting(data.is4Player);
+          if (data.isAgainstBot !== undefined) setIsAgainstBotSetting(data.isAgainstBot);
         }
       } else if (Array.isArray(data)) {
         setLobbyPlayers(data);
@@ -255,7 +257,7 @@ export default function App() {
     }
   }, [errorMessage]);
 
-  const handleJoinLobby = (name, requiredCanastras, playAgainstBot, targetScore, is4Player, roomId = 'mesa-1') => {
+  const handleJoinLobby = (name, requiredCanastras, playAgainstBot, targetScore, is4Player, roomId = 'mesa-1', botMode = '2h2b') => {
     setPlayerName(name);
     setSelectedCanastras(requiredCanastras);
     setIsAgainstBotSetting(playAgainstBot);
@@ -268,7 +270,7 @@ export default function App() {
       localStorage.setItem('buraco_room', roomId);
       localStorage.setItem('buraco_player_name', name);
     } catch (e) {}
-    socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player, roomId });
+    socket.emit('join-lobby', { name, requiredCanastras, isAgainstBot: playAgainstBot, targetScore, is4Player, botMode, roomId });
   };
 
   const handleCancelJoin = () => {
@@ -914,6 +916,8 @@ export default function App() {
           roomsSummary={roomsSummary}
           joined={joined}
           onCancelJoin={handleCancelJoin}
+          isAgainstBotSetting={isAgainstBotSetting}
+          is4PlayerSetting={is4PlayerSetting}
         />
       ) : (
         <Board 

@@ -9,9 +9,11 @@ export default function Lobby({
   connected, 
   currentRoomId, 
   onRoomChange, 
-  roomsSummary = {},
-  joined = false,
-  onCancelJoin
+  roomsSummary = {}, 
+  joined = false, 
+  onCancelJoin,
+  isAgainstBotSetting,
+  is4PlayerSetting
 }) {
   const [name, setName] = useState(() => {
     try {
@@ -25,6 +27,21 @@ export default function Lobby({
   const [requiredCanastras, setRequiredCanastras] = useState(1);
   const [targetScore, setTargetScore] = useState(3000);
   const [is4Player, setIs4Player] = useState(false);
+  const [joinedMode, setJoinedMode] = useState({
+    is4Player: false,
+    againstBot: false,
+    botMode: '2h2b'
+  });
+
+  React.useEffect(() => {
+    if (is4PlayerSetting !== undefined || isAgainstBotSetting !== undefined) {
+      setJoinedMode(prev => ({
+        ...prev,
+        is4Player: is4PlayerSetting !== undefined ? is4PlayerSetting : prev.is4Player,
+        againstBot: isAgainstBotSetting !== undefined ? isAgainstBotSetting : prev.againstBot
+      }));
+    }
+  }, [is4PlayerSetting, isAgainstBotSetting]);
 
   const currentRoomInfo = selectedRoomOption !== 'custom' ? roomsSummary[selectedRoomOption] : null;
   const isCurrentOccupied = currentRoomInfo ? currentRoomInfo.isOccupied : false;
@@ -34,6 +51,10 @@ export default function Lobby({
     setSelectedRoomOption(val);
     const targetRoom = val === 'custom' ? (customRoomName.trim() || 'mesa-personalizada') : val;
     if (onRoomChange) onRoomChange(targetRoom);
+    const info = roomsSummary[val];
+    if (info && info.isWaiting) {
+      if (info.is4Player !== undefined) setIs4Player(!!info.is4Player);
+    }
   };
 
   const handleCustomRoomChange = (val) => {
@@ -41,7 +62,7 @@ export default function Lobby({
     if (onRoomChange) onRoomChange(val.trim() || 'mesa-personalizada');
   };
 
-  const handleJoin = (againstBot) => {
+  const handleJoin = (againstBot, botMode = '2h2b') => {
     if (!name.trim()) return;
     if (isCurrentOccupied && !isReconnecting) {
       alert(`La ${selectedRoomOption.toUpperCase()} ya está ocupada con una partida en curso. Por favor selecciona otra mesa disponible.`);
@@ -54,7 +75,8 @@ export default function Lobby({
       localStorage.setItem('buraco_player_name', name.trim());
       localStorage.setItem('buraco_room', finalRoomId);
     } catch (err) {}
-    onJoin(name.trim(), requiredCanastras, againstBot, targetScore, is4Player, finalRoomId);
+    setJoinedMode({ is4Player, againstBot, botMode });
+    onJoin(name.trim(), requiredCanastras, againstBot, targetScore, is4Player, finalRoomId, botMode);
   };
 
   return (
@@ -104,19 +126,38 @@ export default function Lobby({
                     style={{ cursor: 'pointer', padding: '8px 12px', fontSize: '0.9rem' }}
                   >
                     <option value="mesa-1">
-                      Mesa 1 {roomsSummary['mesa-1']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                      Mesa 1 {roomsSummary['mesa-1']?.isOccupied ? '🔴 (Ocupada)' : (roomsSummary['mesa-1']?.isWaiting ? `🟢 (${roomsSummary['mesa-1']?.playersCount}/${roomsSummary['mesa-1']?.requiredHumans} esperando)` : '🟢 (Libre)')}
                     </option>
                     <option value="mesa-2">
-                      Mesa 2 {roomsSummary['mesa-2']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                      Mesa 2 {roomsSummary['mesa-2']?.isOccupied ? '🔴 (Ocupada)' : (roomsSummary['mesa-2']?.isWaiting ? `🟢 (${roomsSummary['mesa-2']?.playersCount}/${roomsSummary['mesa-2']?.requiredHumans} esperando)` : '🟢 (Libre)')}
                     </option>
                     <option value="mesa-3">
-                      Mesa 3 {roomsSummary['mesa-3']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                      Mesa 3 {roomsSummary['mesa-3']?.isOccupied ? '🔴 (Ocupada)' : (roomsSummary['mesa-3']?.isWaiting ? `🟢 (${roomsSummary['mesa-3']?.playersCount}/${roomsSummary['mesa-3']?.requiredHumans} esperando)` : '🟢 (Libre)')}
                     </option>
                     <option value="mesa-4">
-                      Mesa 4 {roomsSummary['mesa-4']?.isOccupied ? '🔴 (Ocupada)' : '🟢 (Libre)'}
+                      Mesa 4 {roomsSummary['mesa-4']?.isOccupied ? '🔴 (Ocupada)' : (roomsSummary['mesa-4']?.isWaiting ? `🟢 (${roomsSummary['mesa-4']?.playersCount}/${roomsSummary['mesa-4']?.requiredHumans} esperando)` : '🟢 (Libre)')}
                     </option>
                     <option value="custom">Sala Privada (Código Personalizado)...</option>
                   </select>
+                  {currentRoomInfo?.isWaiting && !isCurrentOccupied && (
+                    <div style={{ 
+                      marginTop: '6px', 
+                      padding: '8px 12px', 
+                      borderRadius: '8px', 
+                      background: 'rgba(16, 185, 129, 0.15)', 
+                      border: '1px solid rgba(16, 185, 129, 0.4)', 
+                      color: '#6ee7b7', 
+                      fontSize: '0.8rem',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px'
+                    }}>
+                      <span style={{ fontSize: '1.1rem' }}>👋</span>
+                      <span>
+                        <strong>¡Mesa esperando compañero!</strong> {currentRoomInfo.players?.[0]} ya está esperando en esta mesa ({currentRoomInfo.is4Player ? (currentRoomInfo.isAgainstBot ? '2 Humanos + 2 Bots' : '4 Humanos') : '2 Humanos'}). ¡Hacé clic en ingresar para jugar juntos!
+                      </span>
+                    </div>
+                  )}
                   {isCurrentOccupied && (
                     <div style={{ 
                       marginTop: '6px', 
@@ -234,54 +275,173 @@ export default function Lobby({
                 </div>
                 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  <button 
-                    type="button"
-                    className="btn-primary" 
-                    onClick={() => handleJoin(false)}
-                    style={{ padding: '10px 16px', fontSize: '0.9rem' }}
-                  >
-                    {isReconnecting ? 'Reconectarse a la Mesa' : (is4Player ? 'Ingresar a Partida de 4' : 'Ingresar al Juego')} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
-                  </button>
-                  
-                  <button 
-                    type="button"
-                    className="btn-primary" 
-                    onClick={() => handleJoin(true)}
-                    style={{ 
-                      padding: '10px 16px', 
-                      fontSize: '0.9rem', 
-                      background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', 
-                      boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)' 
-                    }}
-                  >
-                    {isReconnecting ? 'Reconectarse contra la PC' : (is4Player ? 'Jugar con Compañero Bot' : 'Jugar contra la PC (IA)')} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
-                  </button>
+                  {is4Player ? (
+                    <>
+                      {/* Opción 1: 2 Humanos + 2 Bots (2 notebooks) */}
+                      <button 
+                        type="button"
+                        className="btn-primary" 
+                        onClick={() => handleJoin(true, '2h2b')}
+                        style={{ 
+                          padding: '11px 16px', 
+                          fontSize: '0.9rem',
+                          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)',
+                          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.3)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        👥 Jugar 2 Humanos + 2 Bots (2 Notebooks) <ArrowRight size={16} />
+                      </button>
+
+                      {/* Opción 2: 1 Humano + 3 Bots (Solitario - Inicia Ya) */}
+                      <button 
+                        type="button"
+                        className="btn-primary" 
+                        onClick={() => handleJoin(true, '1h3b')}
+                        style={{ 
+                          padding: '10px 16px', 
+                          fontSize: '0.85rem',
+                          background: 'linear-gradient(135deg, #8b5cf6 0%, #7c3aed 100%)',
+                          boxShadow: '0 4px 12px rgba(139, 92, 246, 0.25)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        🤖 Jugar con Pareja Bot vs 2 Bots (Iniciar Ya) <ArrowRight size={16} />
+                      </button>
+
+                      {/* Opción 3: 4 Humanos (4 notebooks) */}
+                      <button 
+                        type="button"
+                        className="btn-primary" 
+                        onClick={() => handleJoin(false)}
+                        style={{ 
+                          padding: '9px 16px', 
+                          fontSize: '0.85rem',
+                          background: 'rgba(255, 255, 255, 0.08)',
+                          border: '1px solid rgba(255, 255, 255, 0.2)',
+                          color: '#cbd5e1',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px'
+                        }}
+                      >
+                        👨‍👩‍👧‍👦 Partida de 4 Humanos (4 Notebooks)
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button 
+                        type="button"
+                        className="btn-primary" 
+                        onClick={() => handleJoin(false)}
+                        style={{ padding: '10px 16px', fontSize: '0.9rem' }}
+                      >
+                        {isReconnecting ? 'Reconectarse a la Mesa' : 'Jugar contra otro Humano (2 Notebooks)'} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
+                      </button>
+                      
+                      <button 
+                        type="button"
+                        className="btn-primary" 
+                        onClick={() => handleJoin(true)}
+                        style={{ 
+                          padding: '10px 16px', 
+                          fontSize: '0.9rem', 
+                          background: 'linear-gradient(135deg, #3b82f6 0%, #2563eb 100%)', 
+                          boxShadow: '0 4px 12px rgba(59, 130, 246, 0.25)' 
+                        }}
+                      >
+                        {isReconnecting ? 'Reconectarse contra la PC' : 'Jugar contra la PC (1 vs 1 IA)'} <ArrowRight size={16} style={{ marginLeft: '6px', display: 'inline-block', verticalAlign: 'middle' }} />
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
             ) : (
               <div style={{ textAlign: 'center' }}>
-                <div className="lobby-info" style={{ marginBottom: '14px', padding: '10px' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '4px', fontSize: '0.9rem' }}>
+                <div className="lobby-info" style={{ marginBottom: '14px', padding: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px', marginBottom: '6px', fontSize: '0.9rem' }}>
                     <div className={`status-dot ${connected ? 'connected' : ''}`}></div>
                     <span>{connected ? 'Conectado' : 'Conectando...'}</span>
                   </div>
-                  <div style={{ marginTop: '6px', fontSize: '0.85rem', color: '#38bdf8', fontWeight: 600 }}>
+                  <div style={{ marginTop: '4px', fontSize: '0.9rem', color: '#38bdf8', fontWeight: 700 }}>
                     🪑 {selectedRoomOption === 'custom' ? (customRoomName.toUpperCase() || 'SALA PRIVADA') : selectedRoomOption.toUpperCase()}
                   </div>
-                  <p style={{ color: '#94a3b8', fontSize: '0.75rem', margin: '4px 0 0 0' }}>
-                    {is4Player 
-                      ? 'Esperando a 4 jugadores...'
-                      : 'Esperando al segundo jugador...'
-                    }
-                  </p>
+
+                  {joinedMode.is4Player && joinedMode.againstBot ? (
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ color: '#fbbf24', fontWeight: 700, fontSize: '0.95rem' }}>
+                        Esperando al 2º jugador humano ({players.length} de 2 conectados)
+                      </div>
+                      <p style={{ color: '#94a3b8', fontSize: '0.78rem', margin: '4px 0 0 0', lineHeight: 1.4 }}>
+                        La mesa se completará automáticamente con 2 Bots (IA) para formar las 2 parejas.
+                      </p>
+                    </div>
+                  ) : joinedMode.is4Player ? (
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ color: '#38bdf8', fontWeight: 700, fontSize: '0.95rem' }}>
+                        Esperando a 4 jugadores humanos ({players.length} de 4 conectados)
+                      </div>
+                      <p style={{ color: '#94a3b8', fontSize: '0.78rem', margin: '4px 0 0 0' }}>
+                        La partida iniciará cuando ingresen los 4 jugadores a esta mesa.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{ marginTop: '8px' }}>
+                      <div style={{ color: '#38bdf8', fontWeight: 700, fontSize: '0.95rem' }}>
+                        Esperando al segundo jugador humano ({players.length} de 2 conectados)
+                      </div>
+                      <p style={{ color: '#94a3b8', fontSize: '0.78rem', margin: '4px 0 0 0' }}>
+                        La partida iniciará cuando el otro jugador ingrese a esta mesa.
+                      </p>
+                    </div>
+                  )}
                 </div>
 
                 <div className="lobby-players-list" style={{ padding: '10px' }}>
-                  <h3 style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '6px' }}>
-                    Jugadores en esta mesa:
+                  <h3 style={{ fontSize: '0.75rem', color: '#94a3b8', textTransform: 'uppercase', marginBottom: '8px' }}>
+                    Composición de la mesa:
                   </h3>
-                  {players.length === 0 ? (
-                    <p style={{ fontStyle: 'italic', color: '#64748b', fontSize: '0.8rem', margin: 0 }}>Nadie conectado aún</p>
+                  {joinedMode.is4Player && joinedMode.againstBot ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                      {/* Jugador 1 */}
+                      <div className="lobby-player-row" style={{ padding: '6px 8px', fontSize: '0.85rem' }}>
+                        <Users size={14} style={{ color: '#10b981' }} />
+                        <span style={{ fontWeight: 600 }}>{players[0] || name} (Humano)</span>
+                        <span style={{ fontSize: '0.7rem', color: '#10b981', marginLeft: 'auto' }}>Conectado</span>
+                      </div>
+                      {/* Jugador 2 (o esperando) */}
+                      {players.length >= 2 ? (
+                        <div className="lobby-player-row" style={{ padding: '6px 8px', fontSize: '0.85rem' }}>
+                          <Users size={14} style={{ color: '#10b981' }} />
+                          <span style={{ fontWeight: 600 }}>{players[1]} (Humano)</span>
+                          <span style={{ fontSize: '0.7rem', color: '#10b981', marginLeft: 'auto' }}>Conectado</span>
+                        </div>
+                      ) : (
+                        <div className="lobby-player-row" style={{ padding: '6px 8px', fontSize: '0.85rem', background: 'rgba(251, 191, 36, 0.08)', border: '1px dashed rgba(251, 191, 36, 0.4)' }}>
+                          <span style={{ fontSize: '0.9rem' }}>⏳</span>
+                          <span style={{ color: '#fbbf24', fontStyle: 'italic' }}>Esperando al 2º Jugador Humano...</span>
+                          <span style={{ fontSize: '0.7rem', color: '#fbbf24', marginLeft: 'auto' }}>Pendiente</span>
+                        </div>
+                      )}
+                      {/* Bots de compañía listos */}
+                      <div className="lobby-player-row" style={{ padding: '6px 8px', fontSize: '0.85rem', opacity: 0.9 }}>
+                        <span style={{ fontSize: '0.9rem' }}>🤖</span>
+                        <span style={{ color: '#cbd5e1' }}>Compu A (Bot Pareja de {players[0] || name})</span>
+                        <span style={{ fontSize: '0.7rem', color: '#38bdf8', marginLeft: 'auto' }}>Listo</span>
+                      </div>
+                      <div className="lobby-player-row" style={{ padding: '6px 8px', fontSize: '0.85rem', opacity: 0.9 }}>
+                        <span style={{ fontSize: '0.9rem' }}>🤖</span>
+                        <span style={{ color: '#cbd5e1' }}>Compu B (Bot Pareja del Rival)</span>
+                        <span style={{ fontSize: '0.7rem', color: '#38bdf8', marginLeft: 'auto' }}>Listo</span>
+                      </div>
+                    </div>
                   ) : (
                     players.map((pName, idx) => (
                       <div key={idx} className="lobby-player-row" style={{ padding: '6px 8px', fontSize: '0.85rem' }}>

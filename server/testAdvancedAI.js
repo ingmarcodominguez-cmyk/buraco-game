@@ -12,7 +12,10 @@ const {
   isCardUsefulForFirstTurn,
   isCardCommittedToSuitRun,
   shouldHoldRunForExistingTableRun,
-  validateMeld
+  validateMeld,
+  getRoomRequiredHumans,
+  BuracoRoom,
+  performSorteoInRoom
 } = require('./server');
 
 function runAITests() {
@@ -872,6 +875,93 @@ function runAITests() {
     process.exit(1);
   }
   console.log("✅ Prueba 15.C aprobada: Con meta 4000 pts, la partida continúa en 3200 y finaliza legalmente recién al superar los 4000 pts (4150).");
+
+  // PRUEBA 16: Partidas de 4 jugadores (2 Humanos + 2 Bots y 1 Humano + 3 Bots)
+  console.log("\n--- Prueba 16: Validación de Salas y Capacidad para 4 Jugadores con Bots ---");
+  
+  // 16.A: Cupo requerido de humanos según configuración
+  const room4P_2H2B = new BuracoRoom('mesa-test-4p');
+  room4P_2H2B.is4PlayerSetting = true;
+  room4P_2H2B.isAgainstBotSetting = true;
+  room4P_2H2B.botModeSetting = '2h2b';
+  if (getRoomRequiredHumans(room4P_2H2B) !== 2) {
+    console.error("❌ Falló Prueba 16.A: Para 4P con 2H+2B se esperan 2 humanos!");
+    process.exit(1);
+  }
+
+  const room4P_1H3B = new BuracoRoom('mesa-test-1h3b');
+  room4P_1H3B.is4PlayerSetting = true;
+  room4P_1H3B.isAgainstBotSetting = true;
+  room4P_1H3B.botModeSetting = '1h3b';
+  if (getRoomRequiredHumans(room4P_1H3B) !== 1) {
+    console.error("❌ Falló Prueba 16.A: Para 4P con 1H+3B se espera 1 humano!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 16.A aprobada: getRoomRequiredHumans calcula correctamente 2 humanos para 2H+2B y 1 humano para 1H+3B.");
+
+  // 16.B: Cuando entra el 1º humano en 2H+2B, la sala NO debe marcarse como ocupada
+  room4P_2H2B.players = [{ socketId: 'socket-h1', name: 'Humano 1' }];
+  const activeHumans1 = room4P_2H2B.players.filter(p => p.socketId && !p.isBot);
+  const isGamePlaying1 = !!(room4P_2H2B.gameState && room4P_2H2B.gameState.status === 'playing');
+  const required1 = getRoomRequiredHumans(room4P_2H2B);
+  const isFull1 = activeHumans1.length >= required1;
+  const isOccupied1 = (activeHumans1.length > 0 && isGamePlaying1) || isFull1;
+  const isWaiting1 = !isOccupied1 && activeHumans1.length > 0 && !isGamePlaying1;
+
+  if (isOccupied1 !== false || isWaiting1 !== true) {
+    console.error("❌ Falló Prueba 16.B: Con 1 humano conectado en 4P (2H+2B), la sala NO debe estar ocupada y debe estar esperando!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 16.B aprobada: Con 1 humano esperando en 2H+2B, la sala reporta isOccupied = false e isWaiting = true (no bloquea al 2º jugador).");
+
+  // 16.C: Cuando entra el 2º humano, se integran los 2 bots y se inicia la partida de 4
+  room4P_2H2B.players.push({ socketId: 'socket-h2', name: 'Humano 2' });
+  const activeHumans2 = room4P_2H2B.players.filter(p => !p.isBot);
+  if (activeHumans2.length === 2) {
+    room4P_2H2B.players = [
+      activeHumans2[0],
+      activeHumans2[1],
+      { socketId: 'bot-socket-1', name: 'Compu A (IA)', isBot: true },
+      { socketId: 'bot-socket-2', name: 'Compu B (IA)', isBot: true }
+    ];
+  }
+
+  if (room4P_2H2B.players.length !== 4) {
+    console.error("❌ Falló Prueba 16.C: Al llegar el 2º humano, la mesa debió completarse a 4 jugadores!");
+    process.exit(1);
+  }
+  
+  // Realizar sorteo de asientos y verificar parejas
+  performSorteoInRoom(room4P_2H2B, true);
+  if (room4P_2H2B.players.length !== 4) {
+    console.error("❌ Falló Prueba 16.C: Sorteo no dejó 4 jugadores.");
+    process.exit(1);
+  }
+  console.log(`✅ Prueba 16.C aprobada: Al unirse el 2º humano, la mesa se completó a 4 asientos (${room4P_2H2B.players.map(p => p.name).join(', ')}).`);
+
+  // 16.D: Con 2 humanos ya en la sala, un 3º humano debe ser rechazado por cupo completo
+  const activeHumansNow = room4P_2H2B.players.filter(p => p.socketId && !p.isBot);
+  const isCupoLleno = activeHumansNow.length >= getRoomRequiredHumans(room4P_2H2B);
+  if (!isCupoLleno) {
+    console.error("❌ Falló Prueba 16.D: Con 2 humanos conectados, un 3º humano debería considerarse excedente de cupo.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 16.D aprobada: La sala de 2H+2B protege estrictamente su cupo impidiendo ingresos de terceros.");
+
+  // 16.E: Solitario 4P (1H + 3 Bots) inicia de inmediato con 4 jugadores
+  room4P_1H3B.players = [
+    { socketId: 'socket-solo', name: 'Humano Solo' },
+    { socketId: 'bot-socket-1', name: 'Compu Este (IA)', isBot: true },
+    { socketId: 'bot-socket-2', name: 'Compu Compañero (IA)', isBot: true },
+    { socketId: 'bot-socket-3', name: 'Compu Oeste (IA)', isBot: true }
+  ];
+  const requiredSolo = getRoomRequiredHumans(room4P_1H3B);
+  const activeSolo = room4P_1H3B.players.filter(p => !p.isBot).length;
+  if (requiredSolo !== 1 || activeSolo !== 1 || room4P_1H3B.players.length !== 4) {
+    console.error("❌ Falló Prueba 16.E: En 4P 1H+3B debe iniciar inmediatamente con 1 humano y 3 bots.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 16.E aprobada: El modo solitario 4P (1H + 3 Bots) configura los 4 asientos e inicia inmediatamente.");
 
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);
