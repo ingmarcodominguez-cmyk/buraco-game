@@ -1210,16 +1210,10 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
 
           {/* Botones de Ordenar y Deshacer */}
           {(() => {
-            const myTeamUndos = gameState.teamUndoCounts?.[myTeamIdx] || 0;
-            const maxUndos = is4P ? 3 : 2;
-            const remainingUndos = Math.max(0, maxUndos - myTeamUndos);
-
-            const isPrevPlayer = safePlayerIndex === (gameState.is4Player 
-              ? (gameState.turn - 1 + 4) % 4 
-              : (gameState.turn === 0 ? 1 : 0)
-            );
-
-            const isCurrentPlayerBot = Boolean(gameState.players?.[gameState.turn]?.isBot);
+            const maxPlayers = is4P ? 4 : 2;
+            const prevPlayerIdx = (gameState.turn - 1 + maxPlayers) % maxPlayers;
+            const isPrevPlayer = safePlayerIndex === prevPlayerIdx;
+            const currentTurnNeedsToDraw = (gameState.turnState === 'draw');
 
             const isStuckEmergency = (
               localHand.length === 1 &&
@@ -1230,11 +1224,12 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
             );
 
             const canRequestUndo = (
-              // Caso 1: Es mi turno
-              isMyTurn ||
-              // Caso 2: Acabo de descartar y el rival aún no robó carta (o el rival es la IA)
-              (isPrevPlayer && (needToDraw || isCurrentPlayerBot))
-            ) && (myTeamUndos < maxUndos || isStuckEmergency);
+              // Caso 1: Es mi turno y ya robé/jugué
+              (isMyTurn && !needToDraw) ||
+              // Caso 2: Acabo de descartar y el rival aún no robó/jugó
+              (isPrevPlayer && currentTurnNeedsToDraw) ||
+              isStuckEmergency
+            );
 
             return (
               <div style={{ display: 'flex', gap: '5px', width: '100%', marginTop: '3px' }}>
@@ -1262,17 +1257,14 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                     opacity: canRequestUndo ? 1 : 0.4
                   }}
                   title={!canRequestUndo 
-                    ? (myTeamUndos >= maxUndos 
-                        ? `Has agotado los ${maxUndos} deshechos de la partida` 
-                        : "Solo disponible durante tu turno o inmediatamente tras descartar"
-                      )
+                    ? "Solo disponible durante tu turno o antes de que el rival robe carta"
                     : (isStuckEmergency
                         ? "⚠️ Estás con 1 carta y sin las canastas necesarias. Presiona para recuperar tus cartas y no trabar la mano."
-                        : `Deshacer jugada (Quedan ${remainingUndos} usos)`
+                        : "Deshacer jugada (pide autorización al rival si ya descartaste)"
                       )
                   }
                 >
-                  ⏪ Deshacer ({remainingUndos})
+                  ⏪ Deshacer
                 </button>
               </div>
             );
@@ -1848,10 +1840,17 @@ export default function Board({ gameState, playerIndex, onAction, lobbyPlayers, 
                 <h3 className="modal-title" style={{ fontSize: '1.4rem', color: '#fbbf24', marginBottom: '12px' }}>
                   Solicitud de Retroceso Enviada
                 </h3>
-                <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '20px', lineHeight: '1.5' }}>
+                <p style={{ color: '#e2e8f0', fontSize: '0.95rem', marginBottom: '16px', lineHeight: '1.5' }}>
                   Esperando que los rivales aprueben o rechacen volver atrás tu jugada...
                 </p>
-                <div className="loading-spinner-small" style={{ margin: '0 auto 10px auto' }}></div>
+                <div className="loading-spinner-small" style={{ margin: '0 auto 16px auto' }}></div>
+                <button 
+                  className="btn-action btn-gray" 
+                  onClick={() => onAction('cancel-undo')}
+                  style={{ padding: '6px 20px', fontSize: '0.85rem' }}
+                >
+                  Cancelar Solicitud
+                </button>
               </>
             ) : getTeamOwnerIndex(gameState.undoRequestedBy, is4P) === myTeamIdx ? (
               <>

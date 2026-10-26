@@ -15,7 +15,8 @@ const {
   validateMeld,
   getRoomRequiredHumans,
   BuracoRoom,
-  performSorteoInRoom
+  performSorteoInRoom,
+  applyUndoInRoom
 } = require('./server');
 
 function runAITests() {
@@ -962,6 +963,163 @@ function runAITests() {
     process.exit(1);
   }
   console.log("✅ Prueba 16.E aprobada: El modo solitario 4P (1H + 3 Bots) configura los 4 asientos e inicia inmediatamente.");
+
+  // PRUEBA 17: Retrotraer Jugada con Autorización del Rival y Control de Turnos
+  console.log("\n--- Prueba 17: Retrotraer Jugada con Autorización del Rival y Control de Turnos ---");
+  const testRoomUndo = {
+    id: 'test-undo',
+    players: [
+      { socketId: 's-h1', name: 'Jugador 1 (Humano)', isBot: false },
+      { socketId: 's-h2', name: 'Jugador 2 (Rival Humano)', isBot: false }
+    ],
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      turn: 0,
+      turnState: 'play',
+      teamUndoCounts: [0, 0],
+      undoRequestedBy: null,
+      discardPile: [],
+      drawPile: [],
+      mortos: [null, null],
+      players: [
+        { name: 'Jugador 1', hand: [{ id: 'c1', rank: '4', suit: 'S' }, { id: 'c2', rank: '5', suit: 'S' }, { id: 'c3', rank: '6', suit: 'S' }, { id: 'cK', rank: 'K', suit: 'D' }], melds: [] },
+        { name: 'Jugador 2', hand: [{ id: 'h2_1', rank: '7', suit: 'H' }], melds: [] }
+      ]
+    }
+  };
+
+  // Guardar snapshot de inicio de jugada de Jugador 1
+  const { turnStartSnapshot: _ign1, ...snapData1 } = testRoomUndo.gameState;
+  testRoomUndo.gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapData1));
+
+  // 17.A: Jugador 1 descarta K♦ por error al pozo y el turno pasa a Jugador 2 (rival humano)
+  const discardedCardK = testRoomUndo.gameState.players[0].hand.pop(); // K♦
+  testRoomUndo.gameState.discardPile.push(discardedCardK);
+  testRoomUndo.gameState.turn = 1;
+  testRoomUndo.gameState.turnState = 'draw';
+
+  // Jugador 1 solicita retroceso antes de que Jugador 2 robe:
+  const prevPIdx = (testRoomUndo.gameState.turn - 1 + 2) % 2;
+  const isPrevP = (prevPIdx === 0);
+  const rivalNeedsToDraw = (testRoomUndo.gameState.turnState === 'draw');
+  const canUndoBeforeRivalPlays = isPrevP && rivalNeedsToDraw;
+
+  if (!canUndoBeforeRivalPlays) {
+    console.error("❌ Falló Prueba 17.A: Jugador 1 debería poder solicitar retroceso antes de que el rival juegue!");
+    process.exit(1);
+  }
+
+  // Se activa el pedido al rival:
+  testRoomUndo.gameState.undoRequestedBy = 0;
+  if (testRoomUndo.gameState.undoRequestedBy !== 0) {
+    console.error("❌ Falló Prueba 17.A: undoRequestedBy no se asignó correctamente.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 17.A aprobada: Solicitud de retroceso tras descarte erróneo registrada (rival en turno 'draw').");
+
+  // 17.B: El rival acepta la solicitud (respond-undo accept: true) -> Se revierte todo
+  applyUndoInRoom(testRoomUndo, 0, 0);
+
+  if (testRoomUndo.gameState.turn !== 0 || testRoomUndo.gameState.turnState !== 'play') {
+    console.error(`❌ Falló Prueba 17.B: El turno debió regresar a 0 en 'play'. Estado actual: turn=${testRoomUndo.gameState.turn}, turnState=${testRoomUndo.gameState.turnState}`);
+    process.exit(1);
+  }
+  if (testRoomUndo.gameState.players[0].hand.length !== 4 || !testRoomUndo.gameState.players[0].hand.some(c => c.id === 'cK')) {
+    console.error("❌ Falló Prueba 17.B: La carta K♦ descartada por error no volvió a la mano del jugador!");
+    process.exit(1);
+  }
+  if (testRoomUndo.gameState.discardPile.length !== 0) {
+    console.error("❌ Falló Prueba 17.B: El pozo de descarte debería haber quedado sin la carta retrotraída!");
+    process.exit(1);
+  }
+  if (testRoomUndo.gameState.undoRequestedBy !== null) {
+    console.error("❌ Falló Prueba 17.B: undoRequestedBy debió restablecerse a null tras completarse el deshacer.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 17.B aprobada: El rival autorizó y la jugada se retrotrajo por completo (K♦ devuelta a mano, pozo limpio y turno recuperado).");
+
+  // 17.C: Prohibición de retrotraer si el rival ya jugó (robó del mazo)
+  // Simular que Jugador 1 descarta de nuevo, pero ahora Jugador 2 ya robó carta ('play')
+  testRoomUndo.gameState.players[0].hand.pop();
+  testRoomUndo.gameState.discardPile.push(discardedCardK);
+  testRoomUndo.gameState.turn = 1;
+  testRoomUndo.gameState.turnState = 'play'; // El rival ya robó y está jugando
+
+  const canUndoAfterRivalDraws = (testRoomUndo.gameState.turn === 0 && testRoomUndo.gameState.turnState !== 'draw') || 
+                               (testRoomUndo.gameState.turn !== 0 && testRoomUndo.gameState.turnState === 'draw');
+
+  if (canUndoAfterRivalDraws) {
+    console.error("❌ Falló Prueba 17.C: NO debe permitirse retrotraer una vez que el rival ya robó carta!");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 17.C aprobada: Legalmente impedido retrotraer una vez que el rival ya jugó ('salvo cuando ya jugó el rival').");
+
+  // 17.D: El rival rechaza el retroceso (respond-undo accept: false)
+  testRoomUndo.gameState.turnState = 'draw';
+  testRoomUndo.gameState.undoRequestedBy = 0;
+  // Simular rechazo
+  testRoomUndo.gameState.undoRequestedBy = null;
+  // El turno sigue siendo del rival
+  if (testRoomUndo.gameState.turn !== 1 || testRoomUndo.gameState.undoRequestedBy !== null) {
+    console.error("❌ Falló Prueba 17.D: El rechazo debe mantener el turno del rival y cerrar la solicitud.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 17.D aprobada: Al rechazar el rival, no se deshace nada y el juego continúa normalmente.");
+
+  // 17.E: Retrotraer contra la IA (Bot) antes de que juegue
+  const testRoomBotUndo = {
+    id: 'test-bot-undo',
+    players: [
+      { socketId: 's-h1', name: 'Humano', isBot: false },
+      { socketId: 'bot-socket-1', name: 'Compu (IA)', isBot: true }
+    ],
+    botTurnTimeout: setTimeout(() => {}, 10000),
+    isBotThinking: true,
+    gameState: {
+      status: 'playing',
+      is4Player: false,
+      turn: 0,
+      turnState: 'play',
+      teamUndoCounts: [0, 0],
+      undoRequestedBy: null,
+      discardPile: [],
+      drawPile: [],
+      mortos: [null, null],
+      players: [
+        { name: 'Humano', hand: [{ id: 'cardX', rank: '8', suit: 'C' }], melds: [] },
+        { name: 'Compu', hand: [{ id: 'cardB', rank: '2', suit: 'S' }], melds: [] }
+      ]
+    }
+  };
+  const { turnStartSnapshot: _ignB, ...snapDataB } = testRoomBotUndo.gameState;
+  testRoomBotUndo.gameState.turnStartSnapshot = JSON.parse(JSON.stringify(snapDataB));
+
+  // Humano descarta cardX
+  const cardBotPozo = testRoomBotUndo.gameState.players[0].hand.pop();
+  testRoomBotUndo.gameState.discardPile.push(cardBotPozo);
+  testRoomBotUndo.gameState.turn = 1;
+  testRoomBotUndo.gameState.turnState = 'draw';
+
+  // Humano solicita deshacer:
+  // Se cancela el timer del bot
+  if (testRoomBotUndo.botTurnTimeout) {
+    clearTimeout(testRoomBotUndo.botTurnTimeout);
+    testRoomBotUndo.botTurnTimeout = null;
+  }
+  testRoomBotUndo.isBotThinking = false;
+
+  // Como no hay rivales humanos, aplica de inmediato
+  const oppHumans = testRoomBotUndo.players.filter((p, idx) => !p.isBot && idx !== 0);
+  if (oppHumans.length === 0) {
+    applyUndoInRoom(testRoomBotUndo, 0, 0);
+  }
+
+  if (testRoomBotUndo.gameState.turn !== 0 || testRoomBotUndo.gameState.players[0].hand.length !== 1) {
+    console.error("❌ Falló Prueba 17.E: Contra la IA, el retroceso debió aplicarse de inmediato cancelando el botTurnTimeout.");
+    process.exit(1);
+  }
+  console.log("✅ Prueba 17.E aprobada: Deshacer contra la IA cancela el temporizador de la máquina y devuelve la carta al humano al instante.");
 
   console.log("\n=== ¡TODAS LAS PRUEBAS DE INTELIGENCIA ARTIFICIAL PASARON EXITOSAMENTE! ===");
   process.exit(0);

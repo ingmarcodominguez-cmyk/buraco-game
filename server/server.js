@@ -469,17 +469,17 @@ function getSanitizedStateForRoom(room, playerIndex) {
     };
   });
 
-  const drawPileCount = state.drawPile.length;
+  const drawPileCount = state.drawPile ? state.drawPile.length : 0;
 
   return {
     ...state,
     drawPile: new Array(drawPileCount).fill({ id: 'hidden', isHidden: true }),
-    mortos: state.mortos.map((m) => {
+    mortos: Array.isArray(state.mortos) ? state.mortos.map((m) => {
       if (!m) return null;
       return new Array(m.length).fill({ id: 'hidden', isHidden: true });
-    }),
+    }) : [null, null],
     players: sanitizedPlayers,
-    scores: room.globalScores,
+    scores: room.globalScores || [0, 0],
     roomId: room.id
   };
 }
@@ -580,6 +580,9 @@ function checkMortoIndirectInRoom(room, playerIdx) {
 function checkAndTriggerBotTurnInRoom(room) {
   if (!room || !room.gameState || room.gameState.status !== 'playing') return;
 
+  // Si hay una solicitud de retroceso de jugada pendiente de aprobación, no disparar turno del bot
+  if (room.gameState.undoRequestedBy !== null) return;
+
   // Timeout de seguridad: Si la IA lleva pensando más de 10 segundos, liberar semáforo
   if (room.isBotThinking && room.botThinkingTimestamp && (Date.now() - room.botThinkingTimestamp > 10000)) {
     console.warn(`Reseteando semáforo isBotThinking de IA en sala ${room.id} por timeout de seguridad.`);
@@ -603,7 +606,7 @@ function checkAndTriggerBotTurnInRoom(room) {
         room.isBotThinking = false;
         sendStateToRoom(room);
       }
-    }, 2500); // Demora simulando pensar y permitiendo al usuario deshacer su descarte si fue erróneo
+    }, 4000); // Demora simulando pensar y permitiendo al usuario deshacer su descarte si fue erróneo
   }
 }
 
@@ -1017,6 +1020,11 @@ io.on('connection', (socket) => {
     if (pIdx === -1) return;
     const gameState = room.gameState;
 
+    if (gameState.undoRequestedBy !== null) {
+      socket.emit('error-message', 'Hay una solicitud de deshacer jugada pendiente de resolución.');
+      return;
+    }
+
     if (gameState.turn !== pIdx) {
       socket.emit('error-message', 'No es tu turno.');
       return;
@@ -1062,6 +1070,11 @@ io.on('connection', (socket) => {
     const pIdx = room.players.findIndex(p => p.socketId === socket.id);
     if (pIdx === -1) return;
     const gameState = room.gameState;
+
+    if (gameState.undoRequestedBy !== null) {
+      socket.emit('error-message', 'Hay una solicitud de deshacer jugada pendiente de resolución.');
+      return;
+    }
 
     if (gameState.turn !== pIdx) {
       socket.emit('error-message', 'No es tu turno.');
@@ -1125,6 +1138,11 @@ io.on('connection', (socket) => {
     const pIdx = room.players.findIndex(p => p.socketId === socket.id);
     if (pIdx === -1) return;
     const gameState = room.gameState;
+
+    if (gameState.undoRequestedBy !== null) {
+      socket.emit('error-message', 'Hay una solicitud de deshacer jugada pendiente de resolución.');
+      return;
+    }
 
     if (gameState.turn !== pIdx) {
       socket.emit('error-message', 'No es tu turno.');
@@ -1197,6 +1215,11 @@ io.on('connection', (socket) => {
     const pIdx = room.players.findIndex(p => p.socketId === socket.id);
     if (pIdx === -1) return;
     const gameState = room.gameState;
+
+    if (gameState.undoRequestedBy !== null) {
+      socket.emit('error-message', 'Hay una solicitud de deshacer jugada pendiente de resolución.');
+      return;
+    }
 
     if (gameState.turn !== pIdx) {
       socket.emit('error-message', 'No es tu turno.');
@@ -1280,6 +1303,11 @@ io.on('connection', (socket) => {
     const pIdx = room.players.findIndex(p => p.socketId === socket.id);
     if (pIdx === -1) return;
     const gameState = room.gameState;
+
+    if (gameState.undoRequestedBy !== null) {
+      socket.emit('error-message', 'Hay una solicitud de deshacer jugada pendiente de resolución.');
+      return;
+    }
 
     if (gameState.turn !== pIdx) {
       socket.emit('error-message', 'No es tu turno.');
@@ -1522,43 +1550,26 @@ io.on('connection', (socket) => {
     if (pIdx === -1) return;
     const gameState = room.gameState;
 
+    // Si ya hay una solicitud de retroceso pendiente, ignorar
+    if (gameState.undoRequestedBy !== null) return;
+
     const maxPlayers = gameState.is4Player ? 4 : 2;
     const isMyTurn = gameState.turn === pIdx;
     const prevPlayerIdx = (gameState.turn - 1 + maxPlayers) % maxPlayers;
-    const isPrevPlayer = gameState.is4Player 
-      ? getTeamOwnerIndex(prevPlayerIdx, true) === getTeamOwnerIndex(pIdx, true) 
-      : prevPlayerIdx === pIdx;
+    const isPrevPlayer = (prevPlayerIdx === pIdx);
 
-    const isCurrentPlayerBot = Boolean(room.players[gameState.turn]?.isBot);
-    // Permitir deshacer:
-    // 1. Durante mi turno de juego
-    // 2. Inmediatamente después de haber descartado una carta al pozo (el turno pasó al siguiente jugador y este aún no robó, o es la IA)
-    const canUndoNow = isMyTurn || (isPrevPlayer && (gameState.turnState === 'draw' || isCurrentPlayerBot));
+    // Salvo cuando ya jugó el rival:
+    // Caso 1: Durante mi turno y ya robé/jugué (gameState.turnState !== 'draw')
+    // Caso 2: Acabo de descartar al pozo (isPrevPlayer) y el rival actual aún NO jugó (gameState.turnState === 'draw')
+    const isCurrentPlayerWaitingToDraw = (gameState.turnState === 'draw');
+    const canUndoNow = (isMyTurn && gameState.turnState !== 'draw') || (isPrevPlayer && isCurrentPlayerWaitingToDraw);
 
     if (!canUndoNow) {
-      socket.emit('error-message', 'Solo puedes deshacer durante tu turno o inmediatamente después de haber descartado.');
-      return;
-    }
-
-    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
-    const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
-    const maxUndos = gameState.is4Player ? 3 : 2;
-
-    const player = gameState.players[pIdx];
-    const teamMelds = gameState.players[teamIdx].melds;
-    const canastrasCount = teamMelds.filter(m => m.length >= 7).length;
-    const requiredCanastras = gameState.requiredCanastras || 1;
-    const hasTakenMorto = gameState.is4Player ? (gameState.mortosTaken[teamIdx] !== null) : gameState.mortosTaken[pIdx];
-
-    const isStuckEmergency = (
-      player &&
-      player.hand.length === 1 &&
-      hasTakenMorto &&
-      canastrasCount < requiredCanastras
-    );
-
-    if (gameState.teamUndoCounts[teamIdx] >= maxUndos && !isStuckEmergency) {
-      socket.emit('error-message', `Tu equipo ya ha utilizado el máximo de ${maxUndos} deshechos permitidos en esta partida.`);
+      if (isPrevPlayer && !isCurrentPlayerWaitingToDraw) {
+        socket.emit('error-message', 'El rival ya ha comenzado su turno robando carta. No se puede retrotraer la jugada.');
+      } else {
+        socket.emit('error-message', 'Solo puedes deshacer durante tu turno o inmediatamente después de haber descartado antes de que juegue el rival.');
+      }
       return;
     }
 
@@ -1567,24 +1578,43 @@ io.on('connection', (socket) => {
       return;
     }
 
-    gameState.undoRequestedBy = pIdx;
-    
+    const teamIdx = getTeamOwnerIndex(pIdx, gameState.is4Player);
+    const opponentTeamIdx = teamIdx === 0 ? 1 : 0;
+
+    // Si había un bot programado para jugar su turno, pausarlo de inmediato
+    if (room.botTurnTimeout) {
+      clearTimeout(room.botTurnTimeout);
+      room.botTurnTimeout = null;
+    }
+    room.isBotThinking = false;
+
+    // Buscar si hay rivales humanos conectados
     const opponentIndices = gameState.is4Player ? [opponentTeamIdx, opponentTeamIdx + 2] : [opponentTeamIdx];
     const opponentHumans = opponentIndices.map(idx => room.players[idx]).filter(p => p && !p.isBot && p.socketId);
-    
+
     if (opponentHumans.length === 0) {
+      // Sin rivales humanos (jugando contra la IA): deshacer inmediatamente
       applyUndoInRoom(room, pIdx, teamIdx);
       return;
     }
 
-    opponentHumans.forEach(opp => {
-      io.to(opp.socketId).emit('undo-requested', {
-        requesterName: room.players[pIdx].name,
-        requesterIdx: pIdx
-      });
-    });
+    // Hay rival(es) humanos: registrar solicitante y enviar estado a TODOS en la sala
+    // para que aparezca inmediatamente el modal de autorización en sus pantallas
+    gameState.undoRequestedBy = pIdx;
+    gameState.lastAction = `${room.players[pIdx].name} solicitó autorización para retrotraer su jugada.`;
 
-    socket.emit('undo-waiting', { message: 'Esperando aprobación del rival para deshacer tu jugada...' });
+    sendStateToRoom(room);
+  });
+
+  socket.on('cancel-undo', () => {
+    const room = findRoomBySocketId(socket.id);
+    if (!room || !room.gameState || room.gameState.status !== 'playing') return;
+    const pIdx = room.players.findIndex(p => p.socketId === socket.id);
+    if (pIdx === -1 || room.gameState.undoRequestedBy !== pIdx) return;
+
+    room.gameState.undoRequestedBy = null;
+    room.gameState.lastAction = `${room.players[pIdx].name} canceló su pedido de retroceso.`;
+    sendStateToRoom(room);
   });
 
   socket.on('respond-undo', ({ accept }) => {
@@ -3757,5 +3787,6 @@ module.exports = {
   getRoomRequiredHumans,
   getRoomsSummary,
   BuracoRoom,
-  performSorteoInRoom
+  performSorteoInRoom,
+  applyUndoInRoom
 };
